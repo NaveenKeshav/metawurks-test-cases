@@ -5,7 +5,12 @@ import { gotoWithRecaptchaMock } from './recaptcha-helper';
 const loginUrl = `${config.appUrl}/login`;
 
 /**
- * Performs login with credentials from .env configuration
+ * Performs a full UI login with credentials from .env configuration.
+ * Successful login lands on /chat (LoginForm does router.push('/chat')).
+ *
+ * Post-login specs normally DON'T need this — they run in the 'chromium'
+ * project which reuses the session saved by auth.setup.ts. Use openDashboard()
+ * there instead. This helper is for tests that exercise the login flow itself.
  */
 export async function loginWithEnvCredentials(page: Page): Promise<void> {
   test.skip(!config.login.isConfigured,
@@ -14,38 +19,29 @@ export async function loginWithEnvCredentials(page: Page): Promise<void> {
 
   await gotoWithRecaptchaMock(page, loginUrl);
 
-  // Fill credentials from .env configuration
-  await page.getByLabel('Email address').fill(config.login.username);
-  await page.getByLabel('Password').fill(config.login.password);
-
-  // Submit the login form
+  await page.locator('#email').fill(config.login.username);
+  await page.locator('#password').fill(config.login.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
-  // Wait for navigation away from /login (successful authentication)
-  await page.waitForURL(url => !url.href.includes('/login'), { timeout: 15000 });
-
-  // Verify we're on the app
-  expect(page.url()).not.toContain('/login');
-  expect(page.url()).toContain(config.appUrl);
+  await page.waitForURL(/\/chat/, { timeout: 30_000 });
+  expect(page.url()).toContain('/chat');
 }
 
 /**
- * Performs login with custom credentials
+ * For specs running with the saved session: open /chat and wait for the
+ * dashboard (WelcomeScreen) to be ready.
  */
-export async function loginWithCredentials(page: Page, username: string, password: string): Promise<void> {
-  await gotoWithRecaptchaMock(page, loginUrl);
-
-  await page.getByLabel('Email address').fill(username);
-  await page.getByLabel('Password').fill(password);
-
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+export async function openDashboard(page: Page): Promise<void> {
+  await page.goto('/chat');
+  await waitForDashboardLoad(page);
 }
 
 /**
- * Waits for the dashboard to load after login
+ * Waits for the dashboard WelcomeScreen to load — it renders two h1s:
+ * "Welcome, {firstName}" and "Let's orchestrate your work!"
  */
 export async function waitForDashboardLoad(page: Page): Promise<void> {
-  await expect(page.getByRole('heading', { name: /Let's orchestrate/i })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole('heading', { name: /Let's orchestrate/i })).toBeVisible({ timeout: 20_000 });
 }
 
 export { loginUrl };

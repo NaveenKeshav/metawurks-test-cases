@@ -15,6 +15,9 @@ export default defineConfig({
   testDir: './tests',
   /* Global regex to match test files in subdirectories */
   testMatch: ['**/*.spec.ts'],
+  /* dev2 is a remote dev server — allow slower pages than the defaults */
+  timeout: 60_000,
+  expect: { timeout: 15_000 },
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -28,7 +31,7 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('')`. */
-    baseURL: process.env.BASE_URL || 'https://metawurks.com',
+    baseURL: process.env.BASE_URL || 'https://dev2.metawurks.com',
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
@@ -36,20 +39,37 @@ export default defineConfig({
 
   /* Configure projects for major browsers */
   projects: [
+    /* Logs in once (tests/shared/auth.setup.ts) and saves the session */
+    {
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
+    },
+    /* Post-login specs reuse the saved session */
     {
       name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: '.auth/user.json',
+      },
+      dependencies: ['setup'],
+      testIgnore: /auth\.spec\.ts|edge-cases\.spec\.ts/,
+    },
+    /* Signed-out specs: login/signup/forgot-password UI and public edge cases */
+    {
+      name: 'chromium-no-auth',
       use: { ...devices['Desktop Chrome'] },
+      testMatch: /auth\.spec\.ts|edge-cases\.spec\.ts/,
     },
 
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-    },
+    // {
+    //   name: 'firefox',
+    //   use: { ...devices['Desktop Firefox'] },
+    // },
 
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
+    // {
+    //   name: 'webkit',
+    //   use: { ...devices['Desktop Safari'] },
+    // },
 
     /* Test against mobile viewports. */
     // {

@@ -1,91 +1,53 @@
 import { test, expect } from '@playwright/test';
-import { loginWithEnvCredentials, waitForDashboardLoad } from '../shared/auth-helper';
+import { openDashboard } from '../shared/auth-helper';
 
+/**
+ * Runs with the saved session (chromium project).
+ * The sidebar "Agents" button (AgentsSection) opens the Skills authoring
+ * panel (components/skills/skills-page.tsx). Skills can be entitlement-gated
+ * per account, so list contents are asserted loosely. The panel is
+ * pre-rendered hidden, so locators filter on visibility.
+ */
 test.describe('Agents / Skills - Post Login', () => {
+
+  test.beforeEach(async ({ page }) => {
+    await openDashboard(page);
+    await page.getByRole('button', { name: 'Agents' }).click();
+    await expect(
+      page.getByText(/Build and run multi-step skills/i).filter({ visible: true }).first()
+    ).toBeVisible({ timeout: 15_000 });
+  });
 
   test.describe('Positive Scenarios', () => {
 
-    test('TC114: Agents section displays heading and skill creation prompt', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Click on Agents section
-      await page.getByText('Agents').click();
-      await page.waitForTimeout(500);
-
-      // Verify Agents section header
-      await expect(page.getByText(/Build and run multi-step skills/i)).toBeVisible();
-      await expect(page.getByText('+ New skill')).toBeVisible();
+    test('TC104: Agents section displays heading and skill creation prompt', async ({ page }) => {
+      await expect(page.getByText(/Build and run multi-step skills/i).filter({ visible: true }).first()).toBeVisible();
+      await expect(page.getByText('+ New skill').filter({ visible: true }).first()).toBeVisible();
     });
 
-    test('TC115: Agents section shows existing skills with run commands', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Click on Agents section
-      await page.getByText('Agents').click();
-      await page.waitForTimeout(500);
-
-      // Verify existing skill is displayed
-      await expect(page.getByText(/Draft & send email/i)).toBeVisible();
-      await expect(page.getByText(/System/)).toBeVisible();
-      await expect(page.getByText(/Summarise the chat/i)).toBeVisible();
-      await expect(page.getByText(/Run with/i)).toBeVisible();
-      await expect(page.getByText(/\/skill run/i)).toBeVisible();
-    });
-
-    test('TC116: Skills section has run button or action for each skill', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Click on Agents section
-      await page.getByText('Agents').click();
-      await page.waitForTimeout(500);
-
-      // Verify the skill has run capability
-      await expect(page.getByText(/Draft & send email/)).toBeVisible();
-    });
-
-    test('TC117: +New skill button is clickable for creating new skills', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Click on Agents section
-      await page.getByText('Agents').click();
-      await page.waitForTimeout(500);
-
-      // Click + New skill button
-      const newSkillBtn = page.getByText('+ New skill');
+    test('TC105: +New skill button is clickable for creating new skills', async ({ page }) => {
+      const newSkillBtn = page.getByText('+ New skill').filter({ visible: true }).first();
       await expect(newSkillBtn).toBeVisible();
-      // Verify button is interactive
       await expect(newSkillBtn).toBeEnabled();
+    });
+
+    test('TC106: Skills list renders a valid state (skills, empty state, or entitlement notice)', async ({ page }) => {
+      // One of: actual skill rows, "No skills yet." empty state, or an
+      // entitlement error — never a blank/crashed panel
+      const anyState = page.getByText(/No skills yet/i)
+        .or(page.getByText(/Run with/i))
+        .or(page.getByText(/not enabled/i))
+        .filter({ visible: true });
+      await expect(anyState.first()).toBeVisible({ timeout: 15_000 });
     });
   });
 
   test.describe('Negative Scenarios', () => {
 
-    test('TC118: Agents section shows proper empty state when no skills exist', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Click on Agents section
-      await page.getByText('Agents').click();
-      await page.waitForTimeout(500);
-
-      // There is at least one skill, so verify the section is not empty
-      await expect(page.getByText(/Build and run multi-step skills/i)).toBeVisible();
-    });
-
-    test('TC119: Agents section should not show unrelated content', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Click on Agents section
-      await page.getByText('Agents').click();
-      await page.waitForTimeout(500);
-
-      // Verify agents don't show knowledge source or data library content
-      await expect(page.getByText(/Build and run multi-step skills/i)).toBeVisible();
+    test('TC107: Agents panel does not replace the whole app shell', async ({ page }) => {
+      // Sidebar must remain functional while the skills panel is open
+      await expect(page.getByText('New Conversation', { exact: true }).first()).toBeVisible();
+      await expect(page.getByText('Knowledge Source', { exact: true })).toBeVisible();
     });
   });
 });

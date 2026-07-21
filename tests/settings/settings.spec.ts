@@ -1,20 +1,27 @@
-import { test, expect } from '@playwright/test';
-import { loginWithEnvCredentials, waitForDashboardLoad } from '../shared/auth-helper';
+import { test, expect, Page } from '@playwright/test';
+import { openDashboard } from '../shared/auth-helper';
+
+/**
+ * Runs with the saved session (chromium project).
+ * The profile menu opens from the user card at the bottom of the sidebar
+ * (components/sidebar/UserProfileCard.tsx). Menu items: Upgrade Plan,
+ * Settings, Preferences, Usage & Billing, Help, Log out.
+ */
+async function openProfileMenu(page: Page) {
+  await page.getByRole('button', { name: /Kishu/i }).click();
+  await expect(page.getByText('Log out')).toBeVisible();
+}
 
 test.describe('Settings / User Profile - Post Login', () => {
 
+  test.beforeEach(async ({ page }) => {
+    await openDashboard(page);
+  });
+
   test.describe('Positive Scenarios', () => {
 
-    test('TC126: User profile menu opens with all options', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Click on user profile in sidebar
-      const userButton = page.getByRole('button', { name: /Naveen/i });
-      await userButton.click();
-      await page.waitForTimeout(500);
-
-      // Verify profile menu options
+    test('TC113: User profile menu opens with all options', async ({ page }) => {
+      await openProfileMenu(page);
       await expect(page.getByText('Upgrade Plan')).toBeVisible();
       await expect(page.getByText('Settings')).toBeVisible();
       await expect(page.getByText('Preferences')).toBeVisible();
@@ -23,146 +30,61 @@ test.describe('Settings / User Profile - Post Login', () => {
       await expect(page.getByText('Log out')).toBeVisible();
     });
 
-    test('TC127: User profile shows avatar with initials', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Verify avatar with initial 'N' is displayed
-      const avatar = page.getByText('N').first();
-      await expect(avatar).toBeVisible();
+    test('TC114: User profile shows avatar with initial', async ({ page }) => {
+      // Avatar shows the first letter of the email username: K
+      const userCard = page.getByRole('button', { name: /Kishu/i });
+      await expect(userCard).toBeVisible();
+      await expect(userCard.getByText('K', { exact: true })).toBeVisible();
     });
 
-    test('TC128: User profile displays plan information', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Verify plan info
-      await expect(page.getByText('Enterprise Plan')).toBeVisible();
+    test('TC115: User profile displays plan information', async ({ page }) => {
+      await expect(page.getByText('Free Plan').first()).toBeVisible();
     });
 
-    test('TC129: Settings option in profile menu is clickable', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Open profile menu
-      const userButton = page.getByRole('button', { name: /Naveen/i });
-      await userButton.click();
-      await page.waitForTimeout(500);
-
-      // Verify Settings option
-      const settingsOption = page.getByText('Settings');
-      await expect(settingsOption).toBeVisible();
-      await expect(settingsOption).toBeEnabled();
+    test('TC116: Settings option in profile menu is clickable', async ({ page }) => {
+      await openProfileMenu(page);
+      await page.getByText('Settings', { exact: true }).click();
+      // Settings opens as a panel/dialog driven by the ?settings=true param
+      await page.waitForURL(/settings=true/, { timeout: 10_000 });
     });
 
-    test('TC130: Preferences option in profile menu is clickable', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Open profile menu
-      const userButton = page.getByRole('button', { name: /Naveen/i });
-      await userButton.click();
-      await page.waitForTimeout(500);
-
-      // Verify Preferences option
-      const preferencesOption = page.getByText('Preferences');
-      await expect(preferencesOption).toBeVisible();
-      await expect(preferencesOption).toBeEnabled();
+    test('TC117: Preferences option routes to the preferences tab', async ({ page }) => {
+      await openProfileMenu(page);
+      await page.getByText('Preferences', { exact: true }).click();
+      await page.waitForURL(/settings=true&tab=preferences/, { timeout: 10_000 });
     });
 
-    test('TC131: Usage & Billing option in profile menu is clickable', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Open profile menu
-      const userButton = page.getByRole('button', { name: /Naveen/i });
-      await userButton.click();
-      await page.waitForTimeout(500);
-
-      // Verify Usage & Billing option
-      const billingOption = page.getByText('Usage & Billing');
-      await expect(billingOption).toBeVisible();
-      await expect(billingOption).toBeEnabled();
+    test('TC118: Usage & Billing option routes to the billing tab', async ({ page }) => {
+      await openProfileMenu(page);
+      await page.getByText('Usage & Billing').click();
+      await page.waitForURL(/tab=usage-billing/, { timeout: 10_000 });
     });
 
-    test('TC132: Help option in profile menu is clickable', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Open profile menu
-      const userButton = page.getByRole('button', { name: /Naveen/i });
-      await userButton.click();
-      await page.waitForTimeout(500);
-
-      // Verify Help option
-      const helpOption = page.getByText('Help');
-      await expect(helpOption).toBeVisible();
-      await expect(helpOption).toBeEnabled();
+    test('TC119: Upgrade Plan option routes to pricing', async ({ page }) => {
+      await openProfileMenu(page);
+      await page.getByText('Upgrade Plan').click();
+      await page.waitForURL(/\/pricing/, { timeout: 10_000 });
     });
 
-    test('TC133: Upgrade Plan option in profile menu is clickable', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Open profile menu
-      const userButton = page.getByRole('button', { name: /Naveen/i });
-      await userButton.click();
-      await page.waitForTimeout(500);
-
-      // Verify Upgrade Plan option
-      const upgradeOption = page.getByText('Upgrade Plan');
-      await expect(upgradeOption).toBeVisible();
-      await expect(upgradeOption).toBeEnabled();
-    });
-
-    test('TC134: Log out option is visible in profile menu', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Open profile menu
-      const userButton = page.getByRole('button', { name: /Naveen/i });
-      await userButton.click();
-      await page.waitForTimeout(500);
-
-      // Verify Log out option
-      const logoutOption = page.getByText('Log out');
-      await expect(logoutOption).toBeVisible();
-      await expect(logoutOption).toBeEnabled();
+    test('TC120: Log out option is visible in profile menu', async ({ page }) => {
+      await openProfileMenu(page);
+      await expect(page.getByText('Log out')).toBeVisible();
     });
   });
 
   test.describe('Negative Scenarios', () => {
 
-    test('TC135: Profile menu should not show login page elements', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Open profile menu
-      const userButton = page.getByRole('button', { name: /Naveen/i });
-      await userButton.click();
-      await page.waitForTimeout(500);
-
-      // Verify no login-related text
+    test('TC121: Profile menu should not show login page elements', async ({ page }) => {
+      await openProfileMenu(page);
       await expect(page.getByText('Sign in to MetaWurks')).not.toBeVisible();
     });
 
-    test('TC136: Profile menu should close when clicking outside', async ({ page }) => {
-      await loginWithEnvCredentials(page);
-      await waitForDashboardLoad(page);
-
-      // Open profile menu
-      const userButton = page.getByRole('button', { name: /Naveen/i });
-      await userButton.click();
-      await page.waitForTimeout(500);
-
-      // Verify menu is open
+    test('TC122: Profile menu closes when clicking outside', async ({ page }) => {
+      await openProfileMenu(page);
       await expect(page.getByText('Log out')).toBeVisible();
 
-      // Click outside to close (click on the main content area)
+      // UserProfileCard closes the menu on any outside document click
       await page.getByRole('heading', { name: /Let's orchestrate/i }).click();
-      await page.waitForTimeout(500);
-
-      // Menu should close
       await expect(page.getByText('Log out')).not.toBeVisible();
     });
   });

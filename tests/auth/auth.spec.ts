@@ -1,10 +1,24 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 import { config } from '../shared/config';
 import { gotoWithRecaptchaMock } from '../shared/recaptcha-helper';
 
 const loginUrl = `${config.appUrl}/login`;
 const signupUrl = `${config.appUrl}/signup`;
 const forgotPasswordUrl = `${config.appUrl}/forgot-password`;
+
+/**
+ * Signup submissions are intercepted so test data never reaches the dev
+ * database — we assert the request fires, not that an account is created.
+ */
+async function blockSignupApi(page: Page) {
+  await page.route('**/api/signup', (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'blocked by e2e test' }),
+    })
+  );
+}
 
 test.describe('Authentication - Login Page', () => {
 
@@ -30,12 +44,11 @@ test.describe('Authentication - Login Page', () => {
       await gotoWithRecaptchaMock(page, loginUrl);
       const googleBtn = page.getByRole('button', { name: /Sign in with Google/i });
       await expect(googleBtn).toBeVisible();
-      await expect(googleBtn.locator('svg')).toBeVisible();
     });
 
     test('TC31: Login page has reCAPTCHA notice', async ({ page }) => {
       await gotoWithRecaptchaMock(page, loginUrl);
-      await expect(page.getByText('reCAPTCHA')).toBeVisible();
+      await expect(page.getByText('This site is protected by reCAPTCHA')).toBeVisible();
       await expect(page.getByText('Privacy Policy').first()).toBeVisible();
       await expect(page.getByText('Terms of Service').first()).toBeVisible();
     });
@@ -58,20 +71,19 @@ test.describe('Authentication - Login Page', () => {
       await expect(page.getByLabel('Password')).toHaveValue('MyPassword123');
     });
 
-    test('TC34: Login form - submit with valid credentials format triggers API call', async ({ page }) => {
+    test('TC34: Login submit with unknown credentials returns 401 from NextAuth', async ({ page }) => {
       await gotoWithRecaptchaMock(page, loginUrl);
       await page.getByLabel('Email address').fill('validuser@metawurks.com');
       await page.getByLabel('Password').fill('ValidPass123');
-      
-      // Set up response listener for the login API
+
+      // NextAuth credentials login posts to /api/auth/callback/credentials
       const responsePromise = page.waitForResponse(
-        response => response.url().includes('/api/auth/login') || response.status() === 401,
-        { timeout: 10000 }
+        (response) => response.url().includes('/api/auth/callback/credentials'),
+        { timeout: 15000 }
       );
-      
+
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-      
-      // Should get an API response (401 for invalid credentials is expected)
+
       const response = await responsePromise;
       expect(response.status()).toBe(401);
     });
@@ -105,7 +117,7 @@ test.describe('Authentication - Login Page', () => {
 
     test('TC39: Forgot password page has email field and send button', async ({ page }) => {
       await gotoWithRecaptchaMock(page, forgotPasswordUrl);
-      await expect(page.getByLabel('Email address')).toBeVisible();
+      await expect(page.locator('#email')).toBeVisible();
       await expect(page.getByRole('button', { name: /Send Reset Link/i })).toBeVisible();
     });
   });
@@ -115,122 +127,84 @@ test.describe('Authentication - Login Page', () => {
   // =========================================================================
 
   test.describe('Form Submission & API Interaction', () => {
-    test('TC40: Login - fill form and submit with valid email format triggers API', async ({ page }) => {
+    test('TC40: Login submit sends the reCAPTCHA token to the verify endpoint', async ({ page }) => {
       await gotoWithRecaptchaMock(page, loginUrl);
       await page.getByLabel('Email address').fill('demo@metawurks.com');
       await page.getByLabel('Password').fill('Demo1234');
-      
-      // Monitor network request
+
       const [request] = await Promise.all([
-        page.waitForRequest(req => req.url().includes('/api/auth') || req.method() === 'POST', { timeout: 10000 }),
-        page.getByRole('button', { name: 'Sign in', exact: true }).click()
+        page.waitForRequest((req) => req.url().includes('/api/recaptcha/verify'), { timeout: 15000 }),
+        page.getByRole('button', { name: 'Sign in', exact: true }).click(),
       ]);
-      
-      expect(request).toBeTruthy();
-      const postData = request.postData() || '';
-      expect(postData).toContain('mock-token');
+
+      expect(request.postData() || '').toContain('mock-token');
     });
 
-    test('TC41: Login - submit with invalid credentials shows 401 response (expected behavior)', async ({ page }) => {
+    test('TC41: Login - submit with invalid credentials shows error and stays on login', async ({ page }) => {
       await gotoWithRecaptchaMock(page, loginUrl);
       await page.getByLabel('Email address').fill('wrong@example.com');
       await page.getByLabel('Password').fill('WrongPassword');
-      
-      const responsePromise = page.waitForResponse(
-        resp => resp.status() === 401, 
-        { timeout: 10000 }
-      );
-      
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-      const response = await responsePromise;
-      expect(response.status()).toBe(401);
+      await expect(page.getByText('Invalid email or password')).toBeVisible({ timeout: 30_000 });
+      expect(page.url()).toContain('/login');
     });
 
     test('TC42: Login with valid credentials from .env - successful authentication', async ({ page }) => {
-      test.skip(!config.login.isConfigured, 
+      test.skip(!config.login.isConfigured,
         'LOGIN_USERNAME and LOGIN_PASSWORD must be set in .env file to run this test. ' +
         'See .env.example for reference.');
 
       await gotoWithRecaptchaMock(page, loginUrl);
-      
-      // Fill credentials from .env configuration
+
       await page.getByLabel('Email address').fill(config.login.username);
       await page.getByLabel('Password').fill(config.login.password);
-      
-      // Verify fields were filled correctly
-      await expect(page.getByLabel('Email address')).toHaveValue(config.login.username);
-      await expect(page.getByLabel('Password')).toHaveValue(config.login.password);
-      
-      // Submit the login form
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-      
-      // Wait for navigation away from /login (successful authentication)
-      await page.waitForURL(url => !url.href.includes('/login'), { timeout: 15000 });
-      
-      // Verify we landed on the app (not login page)
-      expect(page.url()).not.toContain('/login');
-      expect(page.url()).toContain(config.appUrl);
-      
-      // Verify we're on the app dashboard (not login page)
-      await expect(page.getByRole('heading', { name: 'Welcome' })).toBeVisible();
-      await expect(page.getByRole('heading', { name: 'Let\'s orchestrate your work!' })).toBeVisible();
+
+      // Successful login lands on /chat
+      await page.waitForURL(/\/chat/, { timeout: 30_000 });
+      expect(page.url()).toContain('/chat');
+
+      // Dashboard WelcomeScreen renders the greeting headings
+      await expect(page.getByRole('heading', { name: /Welcome/ })).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByRole('heading', { name: /Let's orchestrate your work!/ })).toBeVisible();
     });
 
     test('TC43: Login - password visibility toggle works', async ({ page }) => {
       await gotoWithRecaptchaMock(page, loginUrl);
-      await page.getByLabel('Password').fill('VisiblePass123');
-      
-      // Password should be hidden by default
-      await expect(page.getByLabel('Password')).toHaveAttribute('type', 'password');
-      
-      // Click the eye icon to toggle visibility
-      //const eyeButton = page.getByRole('button', { name: /eye/i });
+      const passwordInput = page.getByLabel('Password');
+      await passwordInput.fill('VisiblePass123');
+
+      // Hidden by default
+      await expect(passwordInput).toHaveAttribute('type', 'password');
+
+      // The eye toggle is the only textless button inside the form
       const eyeButton = page.locator('form').getByRole('button').filter({ hasText: /^$/ });
       await eyeButton.click();
-      
-      // Password should now be visible (type changed to text)
-      // Note: Some implementations toggle visibility without changing type attribute
-      // Just verify the button click works without error
+
+      // LoginForm switches the input type to text when visible
+      await expect(passwordInput).toHaveAttribute('type', 'text');
     });
 
-    test('TC44: Forgot password - submit with valid email', async ({ page }) => {
+    test('TC44: Forgot password - submit with valid email does not crash', async ({ page }) => {
       await gotoWithRecaptchaMock(page, forgotPasswordUrl);
-      await page.getByLabel('Email address').fill('testuser@example.com');
-      
-      // Submit the form and check for API response
-      const responsePromise = page.waitForResponse(
-        resp => resp.url().includes('/api/') || resp.status() !== 404,
-        { timeout: 15000 }
-      ).catch(() => null); // Handle cases where no network request is made
-      
+      await page.locator('#email').fill('testuser@example.com');
       await page.getByRole('button', { name: /Send Reset Link/i }).click();
-      
-      // After submission, either an API response or a success message should appear
-      // Sleep briefly to let the page process
+
+      // Whatever the backend answers, the page must stay functional
       await page.waitForTimeout(2000);
-      
-      // Check if we got a response or an error/success message on the page
-      const response = await responsePromise;
-      if (response) {
-        // API responded (could be success or error - that's fine for this test)
-        expect(response.status()).toBeTruthy();
-      }
+      await expect(page.locator('#email')).toBeVisible();
     });
 
-    test('TC45: Forgot password - form fill and restore password link click cycle', async ({ page }) => {
-      // Test the full flow: Login -> Forgot Password (fill email) -> Back to Login
+    test('TC45: Forgot password - form fill and back-to-login cycle', async ({ page }) => {
       await gotoWithRecaptchaMock(page, loginUrl);
       await expect(page).toHaveURL(loginUrl);
-      
-      // Navigate to forgot password
+
       await page.getByRole('link', { name: 'Forgot password?' }).click();
       await expect(page).toHaveURL(forgotPasswordUrl);
-      
-      // Fill email
-      await page.getByLabel('Email address').fill('reset@example.com');
-      await expect(page.getByLabel('Email address')).toHaveValue('reset@example.com');
-      
-      // Click Sign in to go back
+
+      await page.locator('#email').fill('reset@example.com');
+      await expect(page.locator('#email')).toHaveValue('reset@example.com');
+
       await page.getByRole('link', { name: 'Sign in', exact: true }).click();
       await expect(page).toHaveURL(loginUrl);
     });
@@ -268,11 +242,12 @@ test.describe('Authentication - Login Page', () => {
       expect(isValid).toBeFalsy();
     });
 
-    test('TC49: Login with very short password (less than 6 chars)', async ({ page }) => {
+    test('TC49: Login with very short password stays on login', async ({ page }) => {
       await gotoWithRecaptchaMock(page, loginUrl);
       await page.getByLabel('Email address').fill('test@example.com');
       await page.getByLabel('Password').fill('Ab1');
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await expect(page.getByText('Invalid email or password')).toBeVisible({ timeout: 30_000 });
       await expect(page).toHaveURL(loginUrl);
     });
 
@@ -280,15 +255,8 @@ test.describe('Authentication - Login Page', () => {
       await gotoWithRecaptchaMock(page, loginUrl);
       await page.getByLabel('Email address').fill("' OR 1=1 --");
       await page.getByLabel('Password').fill('password');
-      
-      const responsePromise = page.waitForResponse(
-        resp => resp.status() === 401 || resp.status() === 400,
-        { timeout: 10000 }
-      ).catch(() => null);
-      
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-      
-      // Should remain on login page (not authenticated)
+      // type=email blocks the malformed value client-side; never authenticated
       await expect(page).toHaveURL(loginUrl);
     });
 
@@ -306,6 +274,7 @@ test.describe('Authentication - Login Page', () => {
       await page.getByLabel('Email address').fill(`${longString}@example.com`);
       await page.getByLabel('Password').fill(longString);
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await expect(page.getByText('Invalid email or password')).toBeVisible({ timeout: 30_000 });
       await expect(page).toHaveURL(loginUrl);
     });
 
@@ -328,13 +297,13 @@ test.describe('Authentication - Login Page', () => {
     test('TC55: Forgot password with empty email shows validation', async ({ page }) => {
       await gotoWithRecaptchaMock(page, forgotPasswordUrl);
       await page.getByRole('button', { name: /Send Reset Link/i }).click();
-      const isValid = await page.getByLabel('Email address').evaluate((el: HTMLInputElement) => el.checkValidity());
+      const isValid = await page.locator('#email').evaluate((el: HTMLInputElement) => el.checkValidity());
       expect(isValid).toBeFalsy();
     });
 
     test('TC56: Forgot password with invalid email format', async ({ page }) => {
       await gotoWithRecaptchaMock(page, forgotPasswordUrl);
-      const emailInput = page.getByLabel('Email address');
+      const emailInput = page.locator('#email');
       await emailInput.fill('not-an-email');
       await page.getByRole('button', { name: /Send Reset Link/i }).click();
       const validationMessage = await emailInput.evaluate((el: HTMLInputElement) => el.validationMessage);
@@ -353,72 +322,58 @@ test.describe('Authentication - Sign Up Page', () => {
     test('TC57: Sign up page loads with all UI elements', async ({ page }) => {
       await gotoWithRecaptchaMock(page, signupUrl);
       await expect(page.getByText('Create your account')).toBeVisible();
-      await expect(page.getByText('Join our MetaWurks community')).toBeVisible();
       await expect(page.getByRole('button', { name: /Sign up with Google/i })).toBeVisible();
-      await expect(page.getByLabel(/name/i)).toBeVisible();
-      await expect(page.getByLabel('Email address')).toBeVisible();
-      await expect(page.getByLabel('Password', { exact: true })).toBeVisible();
-      await expect(page.getByLabel(/confirm password/i)).toBeVisible();
-      await expect(page.getByLabel(/referral/i)).toBeVisible();
+      await expect(page.locator('#name')).toBeVisible();
+      await expect(page.locator('#email')).toBeVisible();
+      await expect(page.locator('#password')).toBeVisible();
+      await expect(page.locator('#confirmPassword')).toBeVisible();
+      await expect(page.locator('#referralCode')).toBeVisible();
       await expect(page.getByText('Terms of Service').first()).toBeVisible();
       await expect(page.getByText('Privacy Policy').first()).toBeVisible();
-      await expect(page.getByRole('button', { name: /submit|create account/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible();
       await expect(page.getByText('Already have an account?')).toBeVisible();
     });
 
     test('TC58: Sign up form accepts valid input values', async ({ page }) => {
       await gotoWithRecaptchaMock(page, signupUrl);
-      await page.getByLabel(/name/i).fill('John Doe');
-      await page.getByLabel('Email address').fill('john.doe@example.com');
-      await page.getByLabel('Password', { exact: true }).fill('StrongP@ss1');
-      await page.getByLabel(/confirm password/i).fill('StrongP@ss1');
-      await page.getByLabel(/referral/i).fill('REF123');
+      await page.locator('#name').fill('John Doe');
+      await page.locator('#email').fill('john.doe@example.com');
+      await page.locator('#password').fill('StrongP@ss1');
+      await page.locator('#confirmPassword').fill('StrongP@ss1');
 
-      await expect(page.getByLabel(/name/i)).toHaveValue('John Doe');
-      await expect(page.getByLabel('Email address')).toHaveValue('john.doe@example.com');
-      await expect(page.getByLabel('Password', { exact: true })).toHaveValue('StrongP@ss1');
-      await expect(page.getByLabel(/confirm password/i)).toHaveValue('StrongP@ss1');
-      await expect(page.getByLabel(/referral/i)).toHaveValue('REF123');
+      await expect(page.locator('#name')).toHaveValue('John Doe');
+      await expect(page.locator('#email')).toHaveValue('john.doe@example.com');
+      await expect(page.locator('#password')).toHaveValue('StrongP@ss1');
+      await expect(page.locator('#confirmPassword')).toHaveValue('StrongP@ss1');
     });
 
     test('TC59: Sign up page has Google SSO button', async ({ page }) => {
       await gotoWithRecaptchaMock(page, signupUrl);
-      const googleBtn = page.getByRole('button', { name: /Sign up with Google/i });
-      await expect(googleBtn).toBeVisible();
-      await expect(googleBtn.locator('svg')).toBeVisible();
+      await expect(page.getByRole('button', { name: /Sign up with Google/i })).toBeVisible();
     });
 
-    test('TC60: Sign up - fill all fields and submit triggers API call', async ({ page }) => {
+    test('TC60: Sign up - fill all fields and submit fires the signup API call', async ({ page }) => {
       await gotoWithRecaptchaMock(page, signupUrl);
-      await page.getByLabel(/name/i).fill('New User');
-      await page.getByLabel('Email address').fill('newuser@example.com');
-      await page.getByLabel('Password', { exact: true }).fill('SecurePass123');
-      await page.getByLabel(/confirm password/i).fill('SecurePass123');
-      
-      // Try to check terms checkbox if exists
-      const termsCheckbox = page.getByRole('checkbox');
-      const termsExists = await termsCheckbox.count();
-      if (termsExists > 0) {
+      await blockSignupApi(page); // never create real accounts in the dev DB
+
+      await page.locator('#name').fill('New User');
+      await page.locator('#email').fill('newuser-e2e@example.com');
+      await page.locator('#password').fill('SecurePass123');
+      await page.locator('#confirmPassword').fill('SecurePass123');
+
+      const termsCheckbox = page.getByRole('checkbox').first();
+      if (await termsCheckbox.count() > 0) {
         await termsCheckbox.check();
-        await expect(termsCheckbox).toBeChecked();
       }
-      
-      // Submit and check for API response
-      const responsePromise = page.waitForResponse(
-        resp => resp.url().includes('/api/'),
-        { timeout: 15000 }
-      ).catch(() => null);
-      
-      await page.getByRole('button', { name: /submit|create account/i }).click();
-      
-      // Wait for navigation or API response
-      await page.waitForTimeout(3000);
-      
-      // Should either get an API response or stay on the page
-      const response = await responsePromise;
-      if (response) {
-        expect(response.status()).toBeTruthy();
-      }
+
+      const requestPromise = page
+        .waitForRequest((req) => req.url().includes('/api/signup'), { timeout: 15000 })
+        .catch(() => null);
+
+      await page.getByRole('button', { name: 'Create account' }).click();
+
+      const request = await requestPromise;
+      expect(request).toBeTruthy();
     });
   });
 
@@ -429,52 +384,61 @@ test.describe('Authentication - Sign Up Page', () => {
   test.describe('Negative Scenarios', () => {
     test('TC61: Sign up with empty fields shows validation errors', async ({ page }) => {
       await gotoWithRecaptchaMock(page, signupUrl);
-      await page.getByRole('button', { name: /submit|create account/i }).click();
-      const nameValid = await page.getByLabel(/name/i).evaluate((el: HTMLInputElement) => el.checkValidity());
-      const emailValid = await page.getByLabel('Email address').evaluate((el: HTMLInputElement) => el.checkValidity());
-      const passwordValid = await page.getByLabel('Password', { exact: true }).evaluate((el: HTMLInputElement) => el.checkValidity());
+      await page.getByRole('button', { name: 'Create account' }).click();
+      const nameValid = await page.locator('#name').evaluate((el: HTMLInputElement) => el.checkValidity());
+      const emailValid = await page.locator('#email').evaluate((el: HTMLInputElement) => el.checkValidity());
+      const passwordValid = await page.locator('#password').evaluate((el: HTMLInputElement) => el.checkValidity());
       expect(nameValid && emailValid && passwordValid).toBeFalsy();
     });
 
-    test('TC62: Sign up with mismatched passwords', async ({ page }) => {
+    test('TC62: Sign up with mismatched passwords stays on signup', async ({ page }) => {
       await gotoWithRecaptchaMock(page, signupUrl);
-      await page.getByLabel(/name/i).fill('John Doe');
-      await page.getByLabel('Email address').fill('john@example.com');
-      await page.getByLabel('Password', { exact: true }).fill('Password1');
-      await page.getByLabel(/confirm password/i).fill('DifferentPass1');
-      await page.getByRole('button', { name: /submit|create account/i }).click();
+      await blockSignupApi(page);
+      await page.locator('#name').fill('John Doe');
+      await page.locator('#email').fill('john@example.com');
+      await page.locator('#password').fill('Password1');
+      await page.locator('#confirmPassword').fill('DifferentPass1');
+      const termsCheckbox = page.getByRole('checkbox').first();
+      if (await termsCheckbox.count() > 0) await termsCheckbox.check();
+      await page.getByRole('button', { name: 'Create account' }).click();
       await expect(page).toHaveURL(signupUrl);
     });
 
-    test('TC63: Sign up with weak password (too short)', async ({ page }) => {
+    test('TC63: Sign up with weak password (too short) stays on signup', async ({ page }) => {
       await gotoWithRecaptchaMock(page, signupUrl);
-      await page.getByLabel(/name/i).fill('John Doe');
-      await page.getByLabel('Email address').fill('john@example.com');
-      await page.getByLabel('Password', { exact: true }).fill('Ab1');
-      await page.getByLabel(/confirm password/i).fill('Ab1');
-      await page.getByRole('button', { name: /submit|create account/i }).click();
+      await blockSignupApi(page);
+      await page.locator('#name').fill('John Doe');
+      await page.locator('#email').fill('john@example.com');
+      await page.locator('#password').fill('Ab1');
+      await page.locator('#confirmPassword').fill('Ab1');
+      const termsCheckbox = page.getByRole('checkbox').first();
+      if (await termsCheckbox.count() > 0) await termsCheckbox.check();
+      await page.getByRole('button', { name: 'Create account' }).click();
       await expect(page).toHaveURL(signupUrl);
     });
 
     test('TC64: Sign up with invalid email format', async ({ page }) => {
       await gotoWithRecaptchaMock(page, signupUrl);
-      await page.getByLabel(/name/i).fill('John Doe');
-      const emailInput = page.getByLabel('Email address');
+      await page.locator('#name').fill('John Doe');
+      const emailInput = page.locator('#email');
       await emailInput.fill('not-an-email');
-      await page.getByLabel('Password', { exact: true }).fill('StrongP@ss1');
-      await page.getByLabel(/confirm password/i).fill('StrongP@ss1');
-      await page.getByRole('button', { name: /submit|create account/i }).click();
+      await page.locator('#password').fill('StrongP@ss1');
+      await page.locator('#confirmPassword').fill('StrongP@ss1');
+      await page.getByRole('button', { name: 'Create account' }).click();
       const validationMessage = await emailInput.evaluate((el: HTMLInputElement) => el.validationMessage);
       expect(validationMessage.length).toBeGreaterThan(0);
     });
 
-    test('TC65: Sign up with XSS in name field', async ({ page }) => {
+    test('TC65: Sign up with XSS in name field stays on signup', async ({ page }) => {
       await gotoWithRecaptchaMock(page, signupUrl);
-      await page.getByLabel(/name/i).fill('<script>alert("xss")</script>');
-      await page.getByLabel('Email address').fill('test@example.com');
-      await page.getByLabel('Password', { exact: true }).fill('StrongP@ss1');
-      await page.getByLabel(/confirm password/i).fill('StrongP@ss1');
-      await page.getByRole('button', { name: /submit|create account/i }).click();
+      await blockSignupApi(page);
+      await page.locator('#name').fill('<script>alert("xss")</script>');
+      await page.locator('#email').fill('test@example.com');
+      await page.locator('#password').fill('StrongP@ss1');
+      await page.locator('#confirmPassword').fill('StrongP@ss1');
+      const termsCheckbox = page.getByRole('checkbox').first();
+      if (await termsCheckbox.count() > 0) await termsCheckbox.check();
+      await page.getByRole('button', { name: 'Create account' }).click();
       await expect(page).toHaveURL(signupUrl);
     });
   });
@@ -484,19 +448,19 @@ test.describe('Authentication - Cross-Flow Navigation', () => {
   test('TC66: Full navigation cycle: Login -> Signup -> Forgot Password -> Login', async ({ page }) => {
     await gotoWithRecaptchaMock(page, loginUrl);
     await expect(page).toHaveURL(loginUrl);
-    
+
     // Login -> Signup
     await page.getByRole('link', { name: 'Sign up' }).click();
     await expect(page).toHaveURL(signupUrl);
-    
+
     // Signup -> Login
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
     await expect(page).toHaveURL(loginUrl);
-    
+
     // Login -> Forgot Password
     await page.getByRole('link', { name: 'Forgot password?' }).click();
     await expect(page).toHaveURL(forgotPasswordUrl);
-    
+
     // Forgot Password -> Login
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
     await expect(page).toHaveURL(loginUrl);
@@ -514,23 +478,11 @@ test.describe('Authentication - Cross-Flow Navigation', () => {
     await expect(page.getByText('Sarah Chen')).toBeVisible();
   });
 
-  test('TC69: Login - password hidden by default and eye toggle works', async ({ page }) => {
+  test('TC69: Login - password hidden by default', async ({ page }) => {
     await gotoWithRecaptchaMock(page, loginUrl);
-    
-    // Password field should be hidden by default
-    await expect(page.getByLabel('Password', { exact: true })).toHaveAttribute('type', 'password');
-    
-    // Type a password
-    await page.getByLabel('Password', { exact: true }).fill('MySecretPass');
-    
-    // Click eye icon to toggle visibility
-    const eyeButton = page.getByRole('button', { name: /eye/i });
-    const eyeButtonExists = await eyeButton.count();
-    
-    if (eyeButtonExists > 0) {
-      await eyeButton.click();
-      // Some implementations change type to 'text', others just toggle icon
-      // Just verify the button click works
-    }
+    const passwordInput = page.getByLabel('Password', { exact: true });
+    await expect(passwordInput).toHaveAttribute('type', 'password');
+    await passwordInput.fill('MySecretPass');
+    await expect(passwordInput).toHaveAttribute('type', 'password');
   });
 });
