@@ -44,7 +44,10 @@ export default defineConfig({
       name: 'setup',
       testMatch: /auth\.setup\.ts/,
     },
-    /* Post-login specs reuse the saved session */
+    /* Authenticated specs reuse the saved session.
+       Suites 4, 6–10 are post-login; Suite 4 clears storageState internally
+       for its logged-out route-protection cases. Remaining legacy specs
+       (agents/projects/settings/pricing → later suites) also run here. */
     {
       name: 'chromium',
       use: {
@@ -52,13 +55,14 @@ export default defineConfig({
         storageState: '.auth/user.json',
       },
       dependencies: ['setup'],
-      testIgnore: /auth\.spec\.ts|edge-cases\.spec\.ts/,
+      testIgnore: /auth\.setup\.ts|suite-(0[1235]|20|21)-.*\.spec\.ts/,
     },
-    /* Signed-out specs: login/signup/forgot-password UI and public edge cases */
+    /* Signed-out specs: Suites 1, 2, 3, 5, 20, 21
+       (login/signup/forgot-reset/referral + login/signup deep edge cases). */
     {
       name: 'chromium-no-auth',
       use: { ...devices['Desktop Chrome'] },
-      testMatch: /auth\.spec\.ts|edge-cases\.spec\.ts/,
+      testMatch: /suite-(0[1235]|20|21)-.*\.spec\.ts/,
     },
 
     // {
