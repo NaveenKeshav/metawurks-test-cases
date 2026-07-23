@@ -5,7 +5,8 @@ End-to-end Playwright tests for the MetaWurks Frontend Web App v2, targeting the
 the **Test Case Document** (`Frontend_WebApp_v2_TestCases_Updated.pdf`, rev.3):
 one spec file per PDF suite, with each `test()` titled by its exact TC ID.
 
-Currently implemented: **Suites 1–25 (340 test cases).**
+Currently implemented: **Suites 1–34 and 36 (486 test cases — full PDF
+coverage).** The PDF has no Suite 35 (it goes Suite 34 → Suite 36).
 See [`specs/SUITES-TRACEABILITY.md`](specs/SUITES-TRACEABILITY.md) for the full
 suite table and the reality-vs-PDF gap notes.
 
@@ -30,7 +31,7 @@ Copy `.env.example` → `.env` and set the dev2 test account:
 
 ```
 tests/
-  suites/           suite-01..25-*.spec.ts     # one file per PDF suite
+  frontend_suites/  suite-01..34,36-*.spec.ts  # one file per PDF suite (no Suite 35)
   shared/           config.ts, auth.setup.ts, auth-helper.ts,
                     app-helpers.ts, recaptcha-helper.ts
   fixtures/         sample.pdf, sample.docx, image.png, clip.mp4,
@@ -45,7 +46,7 @@ specs/
   session to `.auth/user.json`.
 - **`chromium-no-auth`** — signed-out suites: **1, 2, 3, 5, 20, 21**.
 - **`chromium`** — authenticated suites (reuse the saved session): **4, 6–19,
-  22–25**. Suite 4 clears the session internally for its logged-out cases.
+  22–34, 36**. Suite 4 clears the session internally for its logged-out cases.
 
 ## Running
 

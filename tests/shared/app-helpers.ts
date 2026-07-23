@@ -52,20 +52,28 @@ export async function waitForAssistantReply(page: Page, timeout = 60_000): Promi
  * so shared strings resolve to multiple elements — filter on visibility.
  */
 export async function expandKnowledgeSource(page: Page): Promise<void> {
-  await page.getByText('Knowledge Source', { exact: true }).click();
-  await expect(
-    page.getByText('Data Library', { exact: true }).filter({ visible: true }).first()
-  ).toBeVisible();
+  // "Knowledge Source" is a TOGGLE — clicking it when already expanded collapses
+  // it and hides Data Library/Integrations. Only click when they aren't shown.
+  const dataLibrary = page.getByText('Data Library', { exact: true }).filter({ visible: true }).first();
+  if (!(await dataLibrary.count())) {
+    await page.getByText('Knowledge Source', { exact: true }).click();
+  }
+  await expect(dataLibrary).toBeVisible({ timeout: 10_000 });
   await expect(
     page.getByText('Integrations', { exact: true }).filter({ visible: true }).first()
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 10_000 });
 }
 
 export async function openDataLibrary(page: Page): Promise<void> {
   await expandKnowledgeSource(page);
   await page.getByText('Data Library', { exact: true }).filter({ visible: true }).first().click();
+  // Readiness signal must hold in BOTH library states: the "Privacy Protected"
+  // card only renders in the EMPTY state, so once the account has any document
+  // (e.g. our own upload tests created one) it disappears. The Upload entry-point
+  // button — "Upload First Document" (empty) or "Upload Document" (populated) —
+  // is present in both, and is what openUploadModal clicks next.
   await expect(
-    page.getByText('Privacy Protected').filter({ visible: true }).first()
+    page.getByRole('button', { name: /Upload First Document|^Upload Document$/i }).filter({ visible: true }).first()
   ).toBeVisible({ timeout: 15_000 });
 }
 
@@ -97,14 +105,28 @@ export async function openUploadModal(page: Page): Promise<Locator> {
   return modal;
 }
 
-/** The hidden multi-file <input type=file> inside the upload modal (accepts docs/images). */
+/**
+ * The hidden multi-file <input type=file> inside the upload modal (accepts docs/images).
+ * MUST be scoped to the upload dialog: the chat composer (ChatInterface) has its own
+ * `input[type=file]` earlier in the DOM, so an unscoped `.first()` would attach the
+ * file to the chat composer instead — leaving the modal's queue empty and the
+ * "Upload File" button permanently disabled.
+ */
 export function fileInput(page: Page): Locator {
-  return page.locator('input[type="file"]:not([webkitdirectory])').first();
+  return page
+    .getByRole('dialog')
+    .filter({ hasText: 'Upload Documents' })
+    .locator('input[type="file"]:not([webkitdirectory])')
+    .first();
 }
 
-/** The hidden folder <input webkitdirectory>. */
+/** The hidden folder <input webkitdirectory>, scoped to the upload dialog (see fileInput). */
 export function folderInput(page: Page): Locator {
-  return page.locator('input[webkitdirectory]').first();
+  return page
+    .getByRole('dialog')
+    .filter({ hasText: 'Upload Documents' })
+    .locator('input[webkitdirectory]')
+    .first();
 }
 
 // ---------------------------------------------------------------------------
