@@ -1,7 +1,13 @@
 import { test, expect } from '@playwright/test';
+import { config } from '../shared/config';
 import { loginWithEnvCredentials, waitForDashboardLoad } from '../shared/auth-helper';
 
 test.describe('Post-Login Navigation & Sidebar', () => {
+
+  // Skip all tests in this describe block if login credentials are not configured
+  test.skip(!config.login.isConfigured,
+    'LOGIN_USERNAME and LOGIN_PASSWORD must be set in .env file to run these tests. ' +
+    'See .env.example for reference.');
 
   test.describe('Positive Scenarios - Sidebar Navigation', () => {
 

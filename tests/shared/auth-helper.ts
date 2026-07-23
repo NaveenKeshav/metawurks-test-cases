@@ -1,4 +1,4 @@
-import { test, expect, Page } from '@playwright/test';
+import { expect, Page } from '@playwright/test';
 import { config } from './config';
 import { gotoWithRecaptchaMock } from './recaptcha-helper';
 
@@ -6,11 +6,16 @@ const loginUrl = `${config.appUrl}/login`;
 
 /**
  * Performs login with credentials from .env configuration
+ * Note: Callers should use test.skip() at the test/describe level
+ * if config.login.isConfigured is false.
  */
 export async function loginWithEnvCredentials(page: Page): Promise<void> {
-  test.skip(!config.login.isConfigured,
-    'LOGIN_USERNAME and LOGIN_PASSWORD must be set in .env file to run this test. ' +
-    'See .env.example for reference.');
+  if (!config.login.isConfigured) {
+    throw new Error(
+      'LOGIN_USERNAME and LOGIN_PASSWORD must be set in .env file to run this test. ' +
+      'See .env.example for reference.'
+    );
+  }
 
   await gotoWithRecaptchaMock(page, loginUrl);
 
