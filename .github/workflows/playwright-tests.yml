@@ -49,9 +49,9 @@ jobs:
           echo "VIEWPORT_HEIGHT=${{ secrets.VIEWPORT_HEIGHT || '900' }}" >> .env
 
       - name: Run Playwright tests on ${{ matrix.browser }}
-        run: npx playwright test --project=${{ matrix.browser }}
+        run: npx playwright test --project=${{ matrix.browser }} --reporter=line,html
         env:
-          CI: true
+          CI: false
 
       - name: Upload Playwright HTML report
         if: ${{ !cancelled() }}
