@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-dotenv.config({ path: path.resolve(__dirname, '..', '..', '.env'), quiet: true, override: true });
+dotenv.config({ path: path.resolve(__dirname, '..', '..', '.env'), quiet: true });
 
 export const config = {
   baseUrl: process.env.BASE_URL || 'https://metawurks.com',
