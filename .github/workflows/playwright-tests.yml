@@ -22,9 +22,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          repository: metawurks/metawurks-test-cases
-          ref: ${{ github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -46,8 +43,8 @@ jobs:
         run: |
           echo "BASE_URL=${{ secrets.BASE_URL || 'https://metawurks.com/' }}" >> .env
           echo "APP_URL=${{ secrets.APP_URL || 'https://metawurks.com/app' }}" >> .env
-          echo "LOGIN_USERNAME=${{ secrets.LOGIN_USERNAME || 'naveen.keshav@metadottech.com' }}" >> .env
-          echo "LOGIN_PASSWORD=${{ secrets.LOGIN_PASSWORD || '50umyaComputer!' }}" >> .env
+          echo "LOGIN_USERNAME=${{ secrets.LOGIN_USERNAME || '' }}" >> .env
+          echo "LOGIN_PASSWORD=${{ secrets.LOGIN_PASSWORD || '' }}" >> .env
           echo "NAVIGATION_TIMEOUT=${{ secrets.NAVIGATION_TIMEOUT || '30000' }}" >> .env
           echo "ELEMENT_TIMEOUT=${{ secrets.ELEMENT_TIMEOUT || '10000' }}" >> .env
           echo "VIEWPORT_WIDTH=${{ secrets.VIEWPORT_WIDTH || '1280' }}" >> .env
