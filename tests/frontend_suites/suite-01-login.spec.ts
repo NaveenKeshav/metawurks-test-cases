@@ -9,10 +9,15 @@ import { gotoWithRecaptchaMock } from '../shared/recaptcha-helper';
  * Invalid-credentials error text is "Invalid email or password" (LoginForm.tsx:92).
  * Success redirects to /chat (LoginForm.tsx:95).
  *
- * NOTE ON REALITY vs PDF: the app does NOT trim or lowercase the email
- * (lib/auth.ts authorize uses an exact Mongo match on the raw string), so
- * cases 1.8/1.9 assert the ACTUAL behaviour (login is rejected), not the
- * PDF's expected trimming/case-insensitivity.
+ * NOTE ON REALITY vs PDF:
+ *  - 1.8 (leading/trailing spaces): the <input type="email"> sanitises its
+ *    value by stripping surrounding whitespace BEFORE LoginForm reads it
+ *    (verified: fill('  x  ') -> input.value === 'x'). The trimmed email
+ *    matches, so login SUCCEEDS — exactly what the PDF expects. (auth.ts does
+ *    an exact match, but the padded string never reaches it.)
+ *  - 1.9 (case-insensitivity): the app does NOT lowercase; lib/auth.ts
+ *    authorize does an exact Mongo match, so an upper-cased email is rejected.
+ *    1.9 asserts the ACTUAL (case-sensitive) behaviour, not the PDF.
  */
 
 const loginUrl = `${config.appUrl}/login`;
@@ -94,15 +99,16 @@ test.describe('Suite 1 — Login', () => {
   });
 
   test('1.8 Login email with leading/trailing spaces', async ({ page }) => {
-    test.skip(!config.login.isConfigured, 'Needs a real account to prove trimming behaviour');
+    test.skip(!config.login.isConfigured, 'Set LOGIN_USERNAME/LOGIN_PASSWORD in .env');
     await gotoWithRecaptchaMock(page, loginUrl);
-    // PDF expects the email to be trimmed and login to succeed. The app does
-    // NOT trim (lib/auth.ts exact match), so the padded email is rejected.
+    // PDF: '  user@x.com  ' -> email trimmed -> login succeeds.
+    // The email input is type="email"; its value sanitisation strips the
+    // surrounding spaces before submit, so the padded value logs in like 1.1.
     await page.getByLabel(emailField).fill(`  ${config.login.username}  `);
     await page.getByLabel(pwField).fill(config.login.password);
     await page.getByRole('button', signInBtn).click();
-    await expect(page.getByText(invalidError)).toBeVisible({ timeout: 30_000 });
-    expect(page.url()).toContain('/login');
+    await page.waitForURL(/\/chat/, { timeout: 30_000 });
+    expect(page.url()).toContain('/chat');
   });
 
   test('1.9 Email case-insensitivity on login', async ({ page }) => {
@@ -195,17 +201,26 @@ test.describe('Suite 1 — Login', () => {
   });
 
   test('1.16 Login to inactive/locked account', async ({ page }) => {
-    // No seeded locked account and the app has no distinct "locked" state, so
-    // simulate the backend rejecting the credentials callback and assert the
-    // UI shows the generic error rather than crashing.
-    await page.route('**/api/auth/callback/credentials', (route) =>
-      route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ url: null }) })
-    );
+    // PRODUCT GAP: the app has NO locked/disabled-account capability, so the
+    // PDF's required "Account locked/disabled" message + blocked session cannot
+    // exist. Evidence:
+    //   - models/User.ts has no locked/disabled/isActive/status/suspended field.
+    //   - lib/auth.ts authorize() has no account-state check (the only gate,
+    //     earlyAccessApproved, is commented out).
+    //   - LoginForm shows the same generic 'Invalid email or password' for any
+    //     rejected credential — a locked account is indistinguishable from a
+    //     wrong/unregistered one (already covered by 1.2/1.3).
+    // The PDF itself marks this "Automatable: No — requires seeded locked
+    // account". Skipping (not asserting green) so the gap stays visible and the
+    // suite never implies a lock feature works. Track as a real product gap.
+    test.skip(true, 'PRODUCT GAP: no locked/disabled account support (models/User.ts + lib/auth.ts); PDF 1.16 requires it. Not automatable without the feature + a seeded locked account.');
+
+    // If/when account-lock lands, this is the real check to restore:
     await gotoWithRecaptchaMock(page, loginUrl);
-    await page.getByLabel(emailField).fill('locked@example.com');
+    await page.getByLabel(emailField).fill(`locked-${Date.now()}@example.com`);
     await page.getByLabel(pwField).fill('LockedPass123');
     await page.getByRole('button', signInBtn).click();
-    await expect(page.getByText(invalidError)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/account (locked|disabled)/i)).toBeVisible({ timeout: 30_000 });
     expect(page.url()).toContain('/login');
   });
 
@@ -273,8 +288,9 @@ test.describe('Suite 1 — Login', () => {
   });
 
   test('1.21 Login form resubmission blocked while a request is in flight', async ({ page }) => {
-    // Hold the credentials callback open so the first request stays in flight,
-    // and count how many actually fire on a rapid double-click.
+    // PDF: rapid double-click Sign in -> only one login request fires.
+    // Hold the credentials callback open so the first request is genuinely
+    // in flight during the second click, and count how many actually fire.
     let callbackCount = 0;
     await page.route('**/api/auth/callback/credentials', async (route) => {
       callbackCount++;
@@ -284,10 +300,21 @@ test.describe('Suite 1 — Login', () => {
     await gotoWithRecaptchaMock(page, loginUrl);
     await page.getByLabel(emailField).fill('inflight@example.com');
     await page.getByLabel(pwField).fill('SomePassword123');
-    const btn = page.getByRole('button', signInBtn);
-    await btn.click();
-    await btn.click({ force: true }).catch(() => {}); // button disables while loading
+
+    // A real double-click (not two separate .click() calls, which would wait
+    // for the button to re-enable and fire a second, sequential login). The
+    // guard is LoginForm's disabled={isPasswordLoading} — it engages on the
+    // first click's synchronous setIsPasswordLoading(true), so the second
+    // click of the dblclick lands on a disabled button and is a no-op.
+    const submit = page.locator('form button[type="submit"]');
+    await submit.dblclick();
+
+    // Guard is engaged: the button disables and shows the loading label.
+    await expect(submit).toBeDisabled();
+    await expect(submit).toContainText(/signing in/i);
+
+    // Let the in-flight request complete and confirm no second one fired.
     await page.waitForTimeout(2500);
-    expect(callbackCount).toBeLessThanOrEqual(1);
+    expect(callbackCount).toBe(1);
   });
 });

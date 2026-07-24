@@ -33,14 +33,19 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
 }
 
 /**
- * A finished assistant reply is signalled by its "Regenerate response" action,
- * which only renders once streaming for that message has completed
- * (MessageItem.tsx: isAssistant && !isStreamingThisMessage).
+ * A finished assistant reply is signalled by its Regenerate action, which only
+ * renders once streaming for that message has completed (MessageItem.tsx:
+ * isAssistant && !isStreamingThisMessage). The button has no text — its
+ * accessible name comes from the <img alt="Regenerate">, so the role name is
+ * "Regenerate" (NOT the title "Regenerate response"). Verified via the a11y
+ * tree: `button "Regenerate"`.
  */
+export function regenerateButton(page: Page): Locator {
+  return page.getByRole('button', { name: 'Regenerate', exact: true });
+}
+
 export async function waitForAssistantReply(page: Page, timeout = 60_000): Promise<void> {
-  await expect(
-    page.getByRole('button', { name: 'Regenerate response' }).first()
-  ).toBeVisible({ timeout });
+  await expect(regenerateButton(page).first()).toBeVisible({ timeout });
 }
 
 // ---------------------------------------------------------------------------

@@ -161,9 +161,9 @@ test.describe('Suite 23 — Chat streaming deep', () => {
     await page.waitForTimeout(2500);
     const stop = stopControl(page);
     if (await stop.count()) await stop.click({ force: true }).catch(() => {});
-    const regen = page.getByRole('button', { name: 'Regenerate response' }).first();
+    const regen = page.getByRole('button', { name: 'Regenerate', exact: true }).first();
     await expect(regen).toBeVisible({ timeout: 90_000 });
     await regen.click();
-    await expect(page.getByRole('button', { name: 'Regenerate response' }).first()).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByRole('button', { name: 'Regenerate', exact: true }).first()).toBeVisible({ timeout: 90_000 });
   });
 });
