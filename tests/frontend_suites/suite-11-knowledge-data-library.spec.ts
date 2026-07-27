@@ -22,12 +22,27 @@ async function libraryHasDocs(page: Page): Promise<boolean> {
 }
 
 function firstRowKebab(page: Page) {
-  return page.locator('button:has(svg.lucide-more-vertical)').first();
+  // The document-row 3-dots menu button. Deployed dev2 renders an
+  // `lucide-ellipsis-vertical` icon (the local FileRow source uses MoreVertical /
+  // `lucide-more-vertical` — stale) — match both for resilience. FileRow also renders
+  // a hidden mobile kebab (md:hidden), so filter to the VISIBLE desktop one.
+  return page
+    .locator('button:has(svg.lucide-ellipsis-vertical), button:has(svg.lucide-more-vertical)')
+    .filter({ visible: true })
+    .first();
+}
+
+/** The visible document-name cells in the library list (desktop rows). */
+function docNames(page: Page) {
+  return page.locator('span.text-primary.truncate').filter({ visible: true });
 }
 
 test.describe('Suite 11 — Knowledge / Data Library', () => {
 
   test.beforeEach(async ({ page }) => {
+    // The Data Library flow (openDashboard + openDataLibrary + row interactions) is
+    // legitimately slower than the 60s global default.
+    test.setTimeout(120_000);
     await openDashboard(page);
   });
 
@@ -56,13 +71,25 @@ test.describe('Suite 11 — Knowledge / Data Library', () => {
 
   test('11.4 Delete document with confirmation', async ({ page }) => {
     test.skip(!(await libraryHasDocs(page)), 'No documents to delete');
-    page.on('dialog', (d) => d.accept().catch(() => {})); // native window.confirm
-    await firstRowKebab(page).click();
-    const del = page.getByRole('button', { name: 'Delete' }).filter({ visible: true }).first();
-    test.skip(!(await del.count()), 'Delete action not locatable');
-    await del.click();
-    await page.waitForTimeout(1500);
-    await expect(page.getByText('Data Library').first()).toBeVisible();
+    // Capture the first document's name so we can confirm it is genuinely removed.
+    const firstName = docNames(page).first();
+    await expect(firstName).toBeVisible({ timeout: 10_000 });
+    const name = (await firstName.innerText()).trim();
+    // Accept the native window.confirm() the app shows on delete (the "OK" popup).
+    page.on('dialog', (d) => d.accept().catch(() => {}));
+    // Open the document's 3-dots action menu (the VISIBLE desktop kebab).
+    const kebab = firstRowKebab(page);
+    await kebab.scrollIntoViewIfNeeded().catch(() => {});
+    await kebab.click({ timeout: 10_000 });
+    // Click Delete in the row menu (exact, so it is not confused with sidebar rows).
+    const del = page.getByRole('button', { name: 'Delete', exact: true }).filter({ visible: true }).first();
+    await expect(del, 'Delete action not locatable in the row menu').toBeVisible({ timeout: 10_000 });
+    await del.click({ timeout: 10_000 });
+    // After confirming, the document is removed from the list (optimistic delete).
+    await expect(
+      page.getByText(name, { exact: false }).filter({ visible: true }),
+      `document "${name}" should be removed after delete`
+    ).toHaveCount(0, { timeout: 15_000 });
   });
 
   test('11.5 Cancel document delete', async ({ page }) => {

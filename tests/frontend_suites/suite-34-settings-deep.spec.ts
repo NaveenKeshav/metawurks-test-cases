@@ -99,36 +99,93 @@ test.describe('Suite 34 — Settings deep', () => {
     test.skip(true, 'No env/database selector in the UI (config/.env only) — Known Gaps Report');
   });
 
-  test('34.11 Settings Save actually persists (not a fake success)', async ({ page }) => {
-    // PRODUCT BUG (confirmed in app/settings/page.tsx:255): the Preferences "Save"
-    // button is onClick={() => alert('Changes saved!')} — it issues NO persistence
-    // request, and the custom-instructions field is a local useState('') that is never
-    // loaded from or saved to the backend. It falsely reports success every time and
-    // cannot show a save error. PDF 34.11 expects a real save with error handling.
-    // Assert Save issues a persistence request — this FAILS, surfacing the fake save.
+  test('34.11 Settings Save actually persists (not a fake success)', async ({ page, context }) => {
+    // PDF 34.11 expects settings to persist. PRODUCT BUG (verified LIVE on dev2, not
+    // just the source): the Preferences "Save" only pops alert('Changes saved!') and
+    // persists NOTHING — it fires no POST/PUT/PATCH, writes no localStorage, and the
+    // custom-instructions field is EMPTY again after a reload. This asserts the most
+    // direct evidence — the value must survive Save + reload — so it FAILS, surfacing
+    // the fake save, and auto-passes if Save ever genuinely persists.
+    const taSel = /Keep brief and concise|bullet points|instructions/i;
     await openSettings(page, 'preferences');
-    const ta = page.getByPlaceholder(/Keep brief and concise|bullet points|instructions/i).first();
+    const ta = page.getByPlaceholder(taSel).first();
     await expect(ta).toBeVisible({ timeout: 10_000 });
-    await ta.fill('E2E persistence check ' + Date.now());
+    const value = 'E2E persistence check ' + Date.now();
+    await ta.fill(value);
+
     let savedReq = '';
-    page.on('request', (r) => {
+    context.on('request', (r) => {
       if (/^(POST|PUT|PATCH)$/.test(r.method()) &&
           /preference|setting|instruction|profile|account|\/api\/user/i.test(r.url())) savedReq = `${r.method()} ${r.url()}`;
     });
     page.on('dialog', (d) => d.accept().catch(() => {})); // dismiss the fake "Changes saved!" alert
     await page.getByRole('button', { name: 'Save', exact: true }).first().click();
     await page.waitForTimeout(1500);
+
+    // The real test of persistence: reopen Preferences after a full reload.
+    await page.reload();
+    await openSettings(page, 'preferences');
+    const persisted = await page.getByPlaceholder(taSel).first().inputValue().catch(() => '');
+
     expect(
-      savedReq,
-      'PRODUCT BUG: the Preferences "Save" fires NO persistence request — it only alert("Changes saved!") and never saves (app/settings/page.tsx). PDF 34.11 expects a real save.'
-    ).not.toBe('');
+      persisted,
+      `PRODUCT BUG: Preferences "Save" does not persist — after Save + reload the custom-instructions field is "${persisted}" (expected "${value}"); Save fired ${savedReq || 'NO persistence request'} and only alert()s "Changes saved!" (app/settings/page.tsx). PDF 34.11 expects settings to persist.`,
+    ).toBe(value);
   });
 
-  test('34.12 Concurrent settings edit', async ({ page }) => {
-    test.skip(true, 'The one editable persisted field (Preferences → custom instructions) exists, but a concurrent-conflict test would mutate the real account across two live sessions and the UI surfaces no deterministic last-write/conflict signal to assert.');
+  test('34.12 Concurrent settings edit', async ({ page, context }) => {
+    test.setTimeout(120_000);
+    // The genuinely-persisted, editable setting is the Models tab's per-model enable
+    // toggles (persist via PUT /api/user/models). Edit the SAME setting in two live
+    // tabs at once and verify the backend never ends up corrupted/inconsistent.
+    const openModels = async (p: Page) => {
+      await p.goto('/chat?settings=true&tab=models');
+      await expect(p.getByRole('button', { name: 'Account' }).first()).toBeVisible({ timeout: 15_000 });
+      await expect(p.getByRole('switch').first()).toBeVisible({ timeout: 15_000 });
+    };
+    await openModels(page);
+    const getModels = () => page.request.get('/api/user/models').then((r) => r.json()).catch(() => null);
+    const initial = await getModels();
+    const original: string[] | undefined = initial?.enabledModels;
+    const allModels: string[] | undefined = initial?.allModels;
+    test.skip(
+      !Array.isArray(original) || !Array.isArray(allModels) || (allModels?.length ?? 0) < 3,
+      'Per-model toggle setting unavailable / too few models to exercise concurrent edits',
+    );
+
+    const tabB = await context.newPage();
+    await openModels(tabB);
+    // Both tabs edit the SAME setting (the first model's toggle) simultaneously.
+    await Promise.all([
+      page.getByRole('switch').first().click().catch(() => {}),
+      tabB.getByRole('switch').first().click().catch(() => {}),
+    ]);
+    await page.waitForTimeout(2500);
+
+    // No corruption: the persisted list must stay a valid, de-duplicated set of known
+    // model ids (dev2 resolves the race with last-write-wins — the PDF's key guarantee
+    // is that there is no corrupted/garbled save).
+    const ids = (await getModels())?.enabledModels as unknown[];
+    expect(Array.isArray(ids), 'enabledModels must remain a valid array after concurrent edits').toBeTruthy();
+    expect((ids as unknown[]).every((x) => typeof x === 'string'), 'all entries are valid model-id strings').toBeTruthy();
+    expect(new Set(ids).size, 'no duplicate ids introduced by the concurrent writes').toBe((ids as unknown[]).length);
+    expect((ids as string[]).every((x) => allModels!.includes(x)), 'every persisted id is a known model').toBeTruthy();
+    // Both tabs remain functional (the concurrent edit crashed neither).
+    await expect(page.getByRole('switch').first()).toBeVisible();
+    await expect(tabB.getByRole('switch').first()).toBeVisible();
+
+    // Restore the original setting (best-effort cleanup, not an assertion).
+    await page.request.put('/api/user/models', { data: { enabledModels: original } }).catch(() => {});
+    await tabB.close();
   });
 
   test('34.13 API key list shows creation date and last-used timestamp', async ({ page }) => {
-    test.skip(true, 'No API Keys feature/list exists in settings — Known Gaps Report');
+    // Verified LIVE on dev2: the created-at / last-used API-key metadata does NOT
+    // exist. There is no MetaWurks API-key generator or key list (34.7–34.9 absent).
+    // The only API-keys UI is the BYOK provider-key section (Models tab), and its data
+    // source GET /api/user/api-keys returns 404 on dev2; even its shape is only
+    // {provider,label,enabled,hasKey,masked} — no createdAt / lastUsed field, and no
+    // timestamp is rendered anywhere. There is nothing to assert.
+    test.skip(true, 'No API-key created-at/last-used metadata exists on dev2 (no key generator/list; BYOK data has no timestamps and /api/user/api-keys 404s) — Known Gaps Report');
   });
 });

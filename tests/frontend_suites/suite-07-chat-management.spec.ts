@@ -1,6 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import { openDashboard } from '../shared/auth-helper';
-import { composer, sendMessage, waitForAssistantReply } from '../shared/app-helpers';
+import { composer, sendMessage, waitForAssistantReply, regenerateButton } from '../shared/app-helpers';
 
 /**
  * Suite 7 — Chat Management  (PDF TC 7.1–7.20)
@@ -155,9 +155,9 @@ test.describe('Suite 7 — Chat Management', () => {
   test('7.12 Regenerate a response', async ({ page }) => {
     await createChat(page, 'Say a random number.');
     await waitForAssistantReply(page, 90_000);
-    await page.getByRole('button', { name: 'Regenerate response' }).first().click();
+    await regenerateButton(page).first().click();
     // A new generation runs; the action returns afterwards
-    await expect(page.getByRole('button', { name: 'Regenerate response' }).first()).toBeVisible({ timeout: 90_000 });
+    await expect(regenerateButton(page).first()).toBeVisible({ timeout: 90_000 });
   });
 
   test('7.13 Edit a previously sent message', async ({ page }) => {

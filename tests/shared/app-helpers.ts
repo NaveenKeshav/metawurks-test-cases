@@ -33,14 +33,44 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
 }
 
 /**
- * A finished assistant reply is signalled by its "Regenerate response" action,
- * which only renders once streaming for that message has completed
- * (MessageItem.tsx: isAssistant && !isStreamingThisMessage).
+ * A finished assistant reply is signalled by its Regenerate action, which only
+ * renders once streaming for that message has completed (MessageItem.tsx:
+ * isAssistant && !isStreamingThisMessage). NOTE: that button has NO aria-label —
+ * only title="Regenerate response" and a child <img alt="Regenerate">, so its
+ * ACCESSIBLE NAME is "Regenerate" (from the alt), not "Regenerate response".
+ * getByRole({name:'Regenerate response'}) therefore never matches — locate it by
+ * its title attribute instead (unambiguous, tied to the completion affordance).
  */
+export function regenerateButton(page: Page): Locator {
+  return page.locator('button[title="Regenerate response"]');
+}
+
 export async function waitForAssistantReply(page: Page, timeout = 60_000): Promise<void> {
-  await expect(
-    page.getByRole('button', { name: 'Regenerate response' }).first()
-  ).toBeVisible({ timeout });
+  await expect(regenerateButton(page).first()).toBeVisible({ timeout });
+}
+
+/**
+ * The mid-stream Stop control's inner square (ChatInputBar.tsx: the streaming
+ * branch renders a div.bg-muted.rounded-full wrapping a div.bg-foreground.rounded-sm
+ * with onClick={onStop}). Only present while a stream is active. Precise selector —
+ * do NOT use a broad [class*="rounded-sm"], which also matches streamed content.
+ */
+export function stopSquare(page: Page): Locator {
+  return page.locator('form div.rounded-sm.bg-foreground');
+}
+
+/**
+ * Robustly stop a running stream. The Stop control re-renders on every streamed
+ * token, so a single click can hang on a detached node — poll-click with short
+ * timeouts until the control disappears. Returns true once the stream has halted.
+ */
+export async function stopStream(page: Page): Promise<boolean> {
+  for (let i = 0; i < 10; i++) {
+    if (!(await stopSquare(page).count())) return true;
+    await stopSquare(page).first().click({ force: true, timeout: 1200 }).catch(() => {});
+    await page.waitForTimeout(400);
+  }
+  return !(await stopSquare(page).count());
 }
 
 // ---------------------------------------------------------------------------

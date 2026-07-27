@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openDashboard } from '../shared/auth-helper';
-import { composer, sendMessage, waitForAssistantReply, fixture } from '../shared/app-helpers';
+import { composer, sendMessage, waitForAssistantReply, regenerateButton, fixture } from '../shared/app-helpers';
 
 /**
  * Suite 6 — Chat Send/Stream  (PDF TC 6.1–6.18)
@@ -33,7 +33,7 @@ test.describe('Suite 6 — Chat Send/Stream', () => {
     await input.press('Enter'); // whitespace-only
     // Nothing was sent — still on the welcome screen, no user bubble created
     await expect(page.getByRole('heading', { name: /Let's orchestrate/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Regenerate response' })).toHaveCount(0);
+    await expect(regenerateButton(page)).toHaveCount(0);
   });
 
   test('6.3 Very long message (boundary)', async ({ page }) => {

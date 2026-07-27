@@ -94,13 +94,21 @@ test.describe('Suite 19 — Notifications/Voice/Misc', () => {
   });
 
   test('19.9 Slow-network handling', async ({ page }) => {
+    // Deliberately-throttled navigation is far slower than the 60s default.
+    test.setTimeout(120_000);
     const client = await page.context().newCDPSession(page).catch(() => null);
     test.skip(!client, 'CDP throttling unavailable');
+    // Slow-3G-class throttle (~500 kbps, 300ms latency) on the real network.
     await client!.send('Network.emulateNetworkConditions', {
       offline: false, downloadThroughput: (500 * 1024) / 8, uploadThroughput: (500 * 1024) / 8, latency: 300,
     });
-    await openDashboard(page);
-    await expect(composer(page)).toBeVisible({ timeout: 60_000 }); // graceful, no crash
+    // Do NOT use openDashboard here: its page.goto waits for the full 'load' event,
+    // which under throttle blocks on every image/font and far outlasts real
+    // usability (the app is interactive ~18s in, but 'load' can exceed a minute).
+    // "Graceful slow-network handling" = the app renders and becomes usable without
+    // crashing — assert that: navigate to domcontentloaded, then wait for the composer.
+    await page.goto('/chat', { waitUntil: 'domcontentloaded', timeout: 90_000 });
+    await expect(composer(page)).toBeVisible({ timeout: 90_000 }); // graceful, no crash/hang
   });
 
   test('19.10 Basic accessibility checks', async ({ page }) => {

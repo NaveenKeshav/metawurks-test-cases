@@ -6,9 +6,10 @@ import { gotoWithRecaptchaMock } from '../shared/recaptcha-helper';
  * Suite 20 — Login deep edge cases  (PDF TC 20.1–20.15)
  *
  * Signed-out suite. Sources: components/login/LoginForm.tsx, lib/auth.ts,
- * proxy.ts. Reality notes: email is NOT trimmed/lowercased and there is no
- * account lockout, caps-lock warning, or rate-limit — those cases assert the
- * actual graceful-but-unprotected behaviour and note the PDF expectation.
+ * proxy.ts. Reality notes: leading/trailing whitespace in the email IS trimmed
+ * (20.1 logs in successfully), but there is no account lockout, caps-lock
+ * warning, or rate-limit — those cases assert the actual graceful-but-unprotected
+ * behaviour and note the PDF expectation.
  */
 
 const loginUrl = `${config.appUrl}/login`;
@@ -24,11 +25,14 @@ test.describe('Suite 20 — Login deep edge cases', () => {
   test('20.1 Leading/trailing whitespace in email is trimmed before submit', async ({ page }) => {
     test.skip(!config.login.isConfigured, 'Needs a real account to prove trimming');
     await gotoWithRecaptchaMock(page, loginUrl);
-    // PDF expects trimming + success; the app does not trim, so login is rejected.
+    // PDF 20.1 expects the surrounding whitespace to be trimmed and login to SUCCEED
+    // (email treated as the plain address). Verified on dev2: the padded email is
+    // trimmed and the login goes through to /chat — assert that success.
     await page.getByLabel(emailField).fill(`  ${config.login.username}  `);
     await page.getByLabel(pwField).fill(config.login.password);
     await page.getByRole('button', signInBtn).click();
-    await expect(page.getByText(invalidError)).toBeVisible({ timeout: 30_000 });
+    await page.waitForURL(/\/chat/, { timeout: 30_000 });
+    expect(page.url()).toContain('/chat');
   });
 
   test('20.2 Unicode/IDN email address accepted at login', async ({ page }) => {

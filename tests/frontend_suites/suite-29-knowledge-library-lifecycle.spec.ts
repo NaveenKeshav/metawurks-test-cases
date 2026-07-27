@@ -23,10 +23,14 @@ async function libraryHasDocs(page: Page): Promise<boolean> {
 }
 
 function firstRowKebab(page: Page) {
-  // FileRow renders TWO kebabs — a mobile one (md:hidden, first in DOM) and the
-  // desktop one. On the desktop viewport the mobile kebab is display:none, so an
-  // unfiltered .first() lands on a non-actionable element and hangs. Filter visible.
-  return page.locator('button:has(svg.lucide-more-vertical)').filter({ visible: true }).first();
+  // The document-row 3-dots menu button. Deployed dev2 renders an
+  // `lucide-ellipsis-vertical` icon (local FileRow source uses MoreVertical /
+  // `lucide-more-vertical` — stale) — match both. FileRow also renders a hidden
+  // mobile kebab (md:hidden), so filter to the VISIBLE desktop one.
+  return page
+    .locator('button:has(svg.lucide-ellipsis-vertical), button:has(svg.lucide-more-vertical)')
+    .filter({ visible: true })
+    .first();
 }
 
 test.describe('Suite 29 — Knowledge library & document lifecycle', () => {

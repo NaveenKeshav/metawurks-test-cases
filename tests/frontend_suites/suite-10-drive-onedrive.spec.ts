@@ -136,7 +136,33 @@ test.describe('Suite 10 — Google Drive / OneDrive', () => {
   });
 
   test('10.14 Connection error state displayed', async ({ page }) => {
-    test.skip(true, 'No broken-connection error badge / reconnect CTA in the UI (Known Gaps Report)');
+    // PDF 10.14: a broken/revoked connection must show an error badge + reconnect CTA.
+    // The backend DOES track this — on a failed token refresh it sets
+    // connection.status = 'error' with a lastError (lib/connection-service.ts:185) and
+    // GET /api/connections exposes `status`. BUG (verified in source): the Data Drives
+    // UI (DriveFileBrowser) never reads connection.status, so NO error/reconnect state
+    // is rendered. This test surfaces that as a failure when a broken connection is
+    // present, and skips (with setup steps) when the account has none to evaluate.
+    const c = await page.request.get('/api/connections').then((r) => r.json()).catch(() => null);
+    const all = [...(c?.connections?.google ?? []), ...(c?.connections?.microsoft ?? [])];
+    test.skip(
+      all.length === 0,
+      'No drive connection on this account — connect a Drive/OneDrive account and revoke its access externally so /api/connections reports status:"error", then re-run: the UI has no status-based error rendering, so this test will FAIL and surface the bug.'
+    );
+    const broken = all.filter((x: any) => x.status && x.status !== 'active');
+    test.skip(
+      broken.length === 0,
+      `All ${all.length} connection(s) report status 'active' — no broken connection present to surface an error for.`
+    );
+    // A broken connection exists → the UI must surface an error/reconnect state.
+    await openDataDrives(page);
+    await expect(
+      page
+        .getByText(/reconnect|reauthorize|action required|expired|revoked|connection (error|failed)|sign in again/i)
+        .filter({ visible: true })
+        .first(),
+      'PRODUCT BUG: a broken drive connection (status != active) shows NO error badge / reconnect CTA — DriveFileBrowser ignores connection.status (PDF 10.14).'
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test('10.15 Cancel OAuth flow midway', async ({ page }) => {

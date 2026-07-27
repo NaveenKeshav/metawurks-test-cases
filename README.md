@@ -52,7 +52,7 @@ specs/
 
 ```bash
 # Everything
-npx playwright test
+npx playwright test 
 
 # Signed-out suites only (no credentials needed for most cases)
 npx playwright test --project=chromium-no-auth

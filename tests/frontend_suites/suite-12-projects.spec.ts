@@ -29,9 +29,36 @@ async function openCreateDialog(page: Page) {
   await expect(page.locator('#project-name')).toBeVisible({ timeout: 10_000 });
 }
 
+/**
+ * Hover a specific project row and open its 3-dots menu. The "Project options"
+ * button renders only for the hovered/open row, so scope it to THIS project's row
+ * (the name button's parent) — with many leftover projects an unscoped .first()
+ * opens a different menu.
+ */
+async function openProjectOptions(page: Page, name: string) {
+  const nameBtn = page.getByRole('button', { name }).first();
+  await nameBtn.scrollIntoViewIfNeeded().catch(() => {});
+  await nameBtn.hover();
+  const options = nameBtn.locator('xpath=..').getByRole('button', { name: 'Project options' });
+  await expect(options, 'Project options button for this row').toBeVisible({ timeout: 5_000 });
+  await options.click();
+}
+
+/**
+ * A menu/modal action button scoped to whatever popover is currently open.
+ * String names use EXACT matching so "Rename"/"Delete"/"Save" do NOT collide with
+ * project rows named "RenameMe …"/"DeleteMe …" (getByRole name is substring).
+ */
+function visibleButton(page: Page, name: RegExp | string) {
+  return page.getByRole('button', { name, exact: typeof name === 'string' }).filter({ visible: true });
+}
+
 test.describe('Suite 12 — Projects', () => {
 
   test.beforeEach(async ({ page }) => {
+    // Create + rename/delete flows through the projects sidebar are slower than the
+    // 60s global default (heavier with many existing projects).
+    test.setTimeout(120_000);
     await openDashboard(page);
   });
 
@@ -68,18 +95,18 @@ test.describe('Suite 12 — Projects', () => {
     await openCreateDialog(page);
     await page.locator('#project-name').fill(name);
     await page.getByRole('button', { name: 'Create Project' }).click();
-    const row = page.getByRole('button', { name }).first();
-    await expect(row).toBeVisible({ timeout: 15_000 });
-    await row.hover();
-    const options = page.getByRole('button', { name: 'Project options' }).first();
-    test.skip(!(await options.count()), 'Project options menu not locatable');
-    await options.click();
-    await page.getByRole('button', { name: 'Rename' }).click();
+    await expect(page.getByRole('button', { name }).first()).toBeVisible({ timeout: 15_000 });
+    // Hover the project → 3-dots (Project options) → Rename → change name → Save.
+    await openProjectOptions(page, name);
+    await visibleButton(page, 'Rename').click();
     const input = page.locator('input[placeholder="Project name"]');
+    await expect(input).toBeVisible({ timeout: 10_000 });
     const renamed = 'Renamed ' + Date.now();
     await input.fill(renamed);
-    await page.getByRole('button', { name: 'Save' }).click();
+    await visibleButton(page, 'Save').click();
+    // The row now shows the new name, and the old name is gone.
     await expect(page.getByRole('button', { name: renamed }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   });
 
   test('12.5 Switch active project', async ({ page }) => {
@@ -96,11 +123,31 @@ test.describe('Suite 12 — Projects', () => {
   });
 
   test('12.6 Project-scoped chats isolation', async ({ page }) => {
-    test.skip(true, 'Requires seeded chats in multiple projects to compare lists');
+    // Real isolation check: chats are scoped by project_id, so a fresh project must
+    // NOT show the account's other chats. If project scoping were broken (project_id
+    // ignored), the new project would surface all the global chats — this would fail.
+    const created = await page.request.post('/api/projects', { data: { name: 'IsoChats ' + Date.now(), description: '' } });
+    expect(created.status(), 'project created').toBeLessThan(300);
+    const pid = (await created.json()).project_id as string;
+    const gCount = ((await (await page.request.get('/api/chat/history')).json()).chats ?? []).length;
+    const sCount = ((await (await page.request.get(`/api/chat/history?project_id=${encodeURIComponent(pid)}`)).json()).chats ?? []).length;
+    test.skip(gCount === 0, 'Account has no chats to isolate against');
+    expect(sCount, `a fresh project must show none of the ${gCount} global chats (chats are isolated by project)`).toBe(0);
+    await page.request.delete(`/api/projects/${encodeURIComponent(pid)}`).catch(() => {}); // best-effort cleanup
   });
 
   test('12.7 Project-scoped documents isolation', async ({ page }) => {
-    test.skip(true, 'Requires seeded documents in multiple projects to compare lists');
+    // Real isolation check: documents are scoped by project_id, so a fresh project
+    // must NOT show the account's other documents. Broken scoping → the new project
+    // would surface all global docs → this fails.
+    const created = await page.request.post('/api/projects', { data: { name: 'IsoDocs ' + Date.now(), description: '' } });
+    expect(created.status(), 'project created').toBeLessThan(300);
+    const pid = (await created.json()).project_id as string;
+    const gCount = ((await (await page.request.get('/api/documents')).json()).documents ?? []).length;
+    const sCount = ((await (await page.request.get(`/api/documents?project_id=${encodeURIComponent(pid)}`)).json()).documents ?? []).length;
+    test.skip(gCount === 0, 'Account has no documents to isolate against');
+    expect(sCount, `a fresh project must show none of the ${gCount} global documents (docs are isolated by project)`).toBe(0);
+    await page.request.delete(`/api/projects/${encodeURIComponent(pid)}`).catch(() => {}); // best-effort cleanup
   });
 
   test('12.8 Delete/archive a project with confirm', async ({ page }) => {
@@ -108,16 +155,12 @@ test.describe('Suite 12 — Projects', () => {
     await openCreateDialog(page);
     await page.locator('#project-name').fill(name);
     await page.getByRole('button', { name: 'Create Project' }).click();
-    const row = page.getByRole('button', { name }).first();
-    await expect(row).toBeVisible({ timeout: 15_000 });
-    await row.hover();
-    const options = page.getByRole('button', { name: 'Project options' }).first();
-    test.skip(!(await options.count()), 'Project options menu not locatable');
-    await options.click();
-    await page.getByRole('button', { name: 'Delete' }).click();
-    await expect(page.getByText(/Delete .+\?|permanently archived/i)).toBeVisible({ timeout: 10_000 });
-    await page.getByRole('button', { name: /^Delete( anyway)?$/ }).first().click();
-    await expect(page.getByRole('button', { name }).first()).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByRole('button', { name }).first()).toBeVisible({ timeout: 15_000 });
+    await openProjectOptions(page, name);
+    await visibleButton(page, 'Delete').click(); // menu item (exact → not the "DeleteMe" rows)
+    await expect(page.getByText(/permanently archived|no longer appear in your history/i)).toBeVisible({ timeout: 10_000 });
+    await visibleButton(page, /^Delete( anyway)?$/).last().click(); // modal confirm
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0, { timeout: 15_000 });
   });
 
   test('12.9 Project badge displayed on chats', async ({ page }) => {
@@ -158,15 +201,21 @@ test.describe('Suite 12 — Projects', () => {
     await expect(page.getByRole('button', { name: 'Conversations' })).toBeVisible({ timeout: 15_000 });
   });
 
-  test('12.13 Creating a project while offline shows a clear error', async ({ page }) => {
-    await page.route('**/api/projects', (route) =>
-      route.request().method() === 'POST' ? route.abort() : route.continue()
-    );
+  test('12.13 Creating a project while offline shows a clear error', async ({ page, context }) => {
+    // Open the dialog first, then go GENUINELY offline (real browser offline, no route
+    // mock) and submit — the app must surface a clear error and not crash.
     await openCreateDialog(page);
-    await page.locator('#project-name').fill('Offline Project');
+    await page.locator('#project-name').fill('Offline Project ' + Date.now());
+    await context.setOffline(true);
     await page.getByRole('button', { name: 'Create Project' }).click();
-    await page.waitForTimeout(1500);
-    // Error surfaced (role=alert) and no crash
-    await expect(page.getByRole('alert').or(page.locator('#project-name'))).toBeVisible();
+    // Assert the specific error text ("Network error. Try again.") — the previous
+    // getByRole('alert').or(#project-name) matched TWO visible elements (the alert AND
+    // the always-visible input), which is a strict-mode violation exactly when the
+    // error appears.
+    await expect(
+      page.getByText(/Network error\.?\s*Try again|Create failed|failed/i).filter({ visible: true }).first(),
+      'a clear network/create error must be shown when creating a project offline'
+    ).toBeVisible({ timeout: 10_000 });
+    await context.setOffline(false);
   });
 });
