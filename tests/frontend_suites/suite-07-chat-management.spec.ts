@@ -1,4 +1,4 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, Page, Locator } from '@playwright/test';
 import { openDashboard } from '../shared/auth-helper';
 import { composer, sendMessage, waitForAssistantReply, regenerateButton } from '../shared/app-helpers';
 
@@ -23,7 +23,70 @@ async function createChat(page: Page, seed: string) {
 }
 
 function activeRow(page: Page) {
-  return page.locator('.bg-sidebar-hover').first();
+  // Conversation rows are h-[32px] (ConversationsList.tsx). Project rows also use
+  // bg-sidebar-hover but are h-9, so include the height to avoid selecting a
+  // project row (this account has many active/hovered projects).
+  return page.locator('.bg-sidebar-hover.h-\\[32px\\]').first();
+}
+
+/** All sidebar conversation rows (h-[32px] with a title). */
+function chatRows(page: Page) {
+  return page.locator('div.h-\\[32px\\]').filter({ hasText: /\S/ });
+}
+
+/**
+ * Ensure the sidebar has at least one chat, WITHOUT skipping. First give the
+ * history fetch more time; if the account is genuinely empty, seed a chat (new
+ * chats lag in the sidebar, so reload to force a fresh fetch). Returns the count.
+ */
+async function ensureChats(page: Page): Promise<number> {
+  const rows = chatRows(page);
+  let count = await rows.count();
+  if (count === 0) {
+    await rows.first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {});
+    count = await rows.count();
+  }
+  if (count === 0) {
+    await sendMessage(page, 'Seed chat ' + Date.now());
+    await page.reload();
+    await rows.first().waitFor({ state: 'visible', timeout: 60_000 });
+    count = await rows.count();
+  }
+  return count;
+}
+
+/**
+ * Open a conversation row's 3-dot menu robustly. In a cluttered account the row
+ * can be overlapped by sticky sidebar elements (profile card, project rows), so
+ * a coordinate hover is intercepted. Dispatch DOM events directly instead: a
+ * mouseover sets React's hoveredChatId (revealing the button), then a dispatched
+ * click opens the portalled menu. Returns false if the menu can't be opened.
+ */
+async function openRowMenuRobust(page: Page, row: Locator): Promise<boolean> {
+  await row.scrollIntoViewIfNeeded().catch(() => {});
+  await row.dispatchEvent('mouseover');
+  await row.dispatchEvent('mouseenter');
+  const menuBtn = row.getByRole('button').first();
+  if (!(await menuBtn.count())) return false;
+  await menuBtn.dispatchEvent('click');
+  return (await page.getByText('Delete', { exact: true }).filter({ visible: true }).count()) > 0;
+}
+
+/**
+ * Open the Nth existing chat and return its ACTIVE sidebar row
+ * (`.bg-sidebar-hover.h-[32px]`). The active row is unambiguous and immune to
+ * index drift caused by other tests deleting/creating chats in parallel on the
+ * shared account — once opened, THIS context's current chat stays active. Prefer
+ * this over `rows.nth(i)` for any row that will be mutated.
+ */
+async function openChatRow(page: Page, index: number): Promise<Locator> {
+  const rows = chatRows(page);
+  const n = await ensureChats(page);
+  await rows.nth(Math.min(index, n - 1)).dispatchEvent('click');
+  await page.waitForURL(/\/chat\/[^/]+$/, { timeout: 15_000 });
+  const active = page.locator('.bg-sidebar-hover.h-\\[32px\\]').first();
+  await active.waitFor({ state: 'visible', timeout: 10_000 });
+  return active;
 }
 
 /** Hover the active row and open its 3-dot context menu. Returns false if the
@@ -52,55 +115,102 @@ test.describe('Suite 7 — Chat Management', () => {
   });
 
   test('7.2 Delete a chat with confirmation', async ({ page }) => {
-    await createChat(page, 'Chat to be deleted ' + Date.now());
-    test.skip(!(await openRowMenu(page)), 'Row context menu not locatable');
-    await page.getByText('Delete', { exact: true }).filter({ visible: true }).first().click();
-    await expect(page.getByText('Delete chat?')).toBeVisible();
-    await page.getByRole('button', { name: 'Delete' }).click();
-    // Removed → view returns to the welcome screen
+    // Open the topmost chat and delete it. Deleting the chat you're viewing
+    // redirects to the main /chat page (app/chat/[id]/page.tsx:94-96) — that
+    // redirect ALONE proves the deletion + view reset, so we don't assert "title
+    // gone" (fragile with duplicate titles on the polluted account). Operate on
+    // the ACTIVE row (immune to index drift from parallel tests).
+    const active = await openChatRow(page, 0);
+    test.skip(!(await openRowMenuRobust(page, active)), 'Row context menu not locatable');
+    await page.getByText('Delete', { exact: true }).filter({ visible: true }).first().dispatchEvent('click');
+    await expect(page.getByText('Delete chat?')).toBeVisible(); // confirmation, not a silent delete
+    await page.getByRole('button', { name: 'Delete', exact: true }).filter({ visible: true }).last().dispatchEvent('click');
+
+    await page.waitForURL(/\/chat$/, { timeout: 15_000 });
     await expect(page.getByRole('heading', { name: /Let's orchestrate/i })).toBeVisible({ timeout: 20_000 });
   });
 
   test('7.3 Cancel chat deletion', async ({ page }) => {
-    await createChat(page, 'Keep this chat ' + Date.now());
-    test.skip(!(await openRowMenu(page)), 'Row context menu not locatable');
-    await page.getByText('Delete', { exact: true }).filter({ visible: true }).first().click();
+    // Open a chat, then Delete → Cancel keeps it. Operate on the ACTIVE row so a
+    // concurrent delete elsewhere can't shift an index out from under us.
+    const active = await openChatRow(page, 3);
+    const title = (await active.innerText()).trim();
+    test.skip(!(await openRowMenuRobust(page, active)), 'Row context menu not locatable');
+
+    await page.getByText('Delete', { exact: true }).filter({ visible: true }).first().dispatchEvent('click');
     await expect(page.getByText('Delete chat?')).toBeVisible();
-    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).filter({ visible: true }).first().dispatchEvent('click');
+
+    // No changes: modal closes and the (still-active) chat remains with its title.
     await expect(page.getByText('Delete chat?')).toHaveCount(0);
-    await expect(activeRow(page)).toBeVisible(); // chat remains
+    await expect(active).toBeVisible();
+    await expect(active).toContainText(title);
   });
 
   test('7.4 Rename a chat', async ({ page }) => {
-    await createChat(page, 'Chat to rename ' + Date.now());
-    test.skip(!(await openRowMenu(page)), 'Row context menu not locatable');
-    await page.getByText('Rename', { exact: true }).filter({ visible: true }).first().click();
-    const input = page.locator('input[autofocus], .bg-sidebar-hover input').first();
-    await input.fill('My Project');
+    // Open a chat and rename its ACTIVE row to a unique name.
+    const active = await openChatRow(page, 5);
+    test.skip(!(await openRowMenuRobust(page, active)), 'Row context menu not locatable');
+
+    await page.getByText('Rename', { exact: true }).filter({ visible: true }).first().dispatchEvent('click');
+    // The active row's title becomes an inline autoFocus input (ConversationsList.tsx).
+    const newName = 'Renamed ' + Date.now();
+    const input = page.locator('div.h-\\[32px\\] input').first();
+    await input.waitFor({ state: 'visible', timeout: 5_000 });
+    await input.fill(newName);
+
+    // Saving PUTs /api/chat/{id}/title (handleRenameSubmit). Assert it persists
+    // via the response — a reload can't confirm it here (paginated sidebar).
+    const saved = page.waitForResponse(
+      (r) => /\/api\/chat\/[^/]+\/title$/.test(r.url()) && r.request().method() === 'PUT',
+      { timeout: 15_000 }
+    );
     await input.press('Enter');
-    await expect(page.getByText('My Project').filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
+    expect((await saved).ok(), 'title PUT should persist the rename').toBeTruthy();
+
+    // New title shown on the (same) active row.
+    await expect(active).toContainText(newName, { timeout: 15_000 });
   });
 
   test('7.5 Rename with empty title rejected', async ({ page }) => {
-    await createChat(page, 'Chat empty rename ' + Date.now());
-    test.skip(!(await openRowMenu(page)), 'Row context menu not locatable');
-    await page.getByText('Rename', { exact: true }).filter({ visible: true }).first().click();
-    const input = page.locator('input[autofocus], .bg-sidebar-hover input').first();
+    // Open a chat; empty rename is rejected client-side (handleRenameSubmit:
+    // `if (!trimmed) return`), so the ACTIVE row keeps its original title.
+    const active = await openChatRow(page, 7);
+    const oldTitle = (await active.innerText()).trim();
+    test.skip(!(await openRowMenuRobust(page, active)), 'Row context menu not locatable');
+
+    await page.getByText('Rename', { exact: true }).filter({ visible: true }).first().dispatchEvent('click');
+    const input = page.locator('div.h-\\[32px\\] input').first();
+    await input.waitFor({ state: 'visible', timeout: 5_000 });
     await input.fill('');
     await input.press('Enter');
-    // Empty title is not saved — a non-empty row title remains
-    await expect(activeRow(page)).toBeVisible();
-    expect((await activeRow(page).innerText()).trim().length).toBeGreaterThan(0);
+
+    // Not saved: the original, non-empty title remains on the active row.
+    expect(oldTitle.length).toBeGreaterThan(0);
+    await expect(active).toContainText(oldTitle, { timeout: 10_000 });
   });
 
   test('7.6 Auto-title generated from first message', async ({ page }) => {
+    // Unique marker at the START of the message so it survives the title's
+    // ~20-char truncation.
+    const token = 'Zq' + (Date.now() % 1_000_000);
     await page.getByText('New Conversation').first().click();
-    await sendMessage(page, 'What is the capital of France? One word only.');
+    await sendMessage(page, `${token} what is the capital of France, one word`);
     await waitForAssistantReply(page, 90_000);
-    await page.waitForTimeout(4000); // allow the title-generation poll
-    const rowText = (await activeRow(page).innerText().catch(() => '')).trim();
-    // A title exists and is not the raw placeholder
-    expect(rowText.length).toBeGreaterThan(0);
+
+    // PDF (step 3): the sidebar auto-titles the new chat from the first message,
+    // LIVE, without a manual refresh (< 4 s).
+    // PRODUCT BUG: the title IS generated server-side but does NOT surface in the
+    // sidebar until a page reload — the active row stays "New Chat" for the whole
+    // session (verified: still "New Chat" after 40 s; a reload then shows the
+    // "<message>…" title). This assertion targets the CORRECT live behaviour and
+    // will fail until the sidebar live-updates the generated title. Do NOT add a
+    // reload to make it green.
+    const activeRowTitle = page.locator('.bg-sidebar-hover.h-\\[32px\\]').first();
+    await expect(
+      activeRowTitle,
+      'PRODUCT BUG: chat is not auto-titled in the sidebar without a manual refresh (row stays "New Chat")'
+    ).toContainText(token, { timeout: 30_000 });
   });
 
   test('7.7 Chat history pagination / infinite scroll', async ({ page }) => {
@@ -113,43 +223,86 @@ test.describe('Suite 7 — Chat Management', () => {
   });
 
   test('7.8 Switch between chats preserves content', async ({ page }) => {
-    const msgA = 'Alpha content ' + Date.now();
-    await createChat(page, msgA);
-    await page.getByText('New Conversation').first().click();
-    const msgB = 'Bravo content ' + Date.now();
-    await createChat(page, msgB);
-    // Return to chat A via its sidebar row
-    const rowA = page.getByText(msgA, { exact: false }).filter({ visible: true }).first();
-    test.skip(!(await rowA.count()), 'Chat A row not locatable in sidebar');
-    await rowA.click();
-    await expect(page.getByText(msgA).first()).toBeVisible({ timeout: 15_000 });
+    // Switch between two EXISTING chats (new chats lag in the sidebar, so
+    // create-then-switch would skip). Each chat has its own /chat/[id]; opening a
+    // row loads that chat's thread, so the URL is a reliable identity for "each
+    // loads its own messages". Interact via dispatched events (rows are overlapped).
+    const rows = chatRows(page);
+    const before = await ensureChats(page);
+    test.skip(before < 2, 'Need at least two chats to switch between');
+
+    // Two distinctly-titled rows.
+    const titleA = (await rows.nth(0).innerText()).trim();
+    let titleB = '';
+    for (let i = 1; i < Math.min(before, 10); i++) {
+      const t = (await rows.nth(i).innerText()).trim();
+      if (t && t !== titleA) { titleB = t; break; }
+    }
+    test.skip(!titleB, 'Need two distinctly-titled chats');
+    const rowByTitle = (t: string) => page.locator('div.h-\\[32px\\]', { hasText: t }).first();
+
+    // Open A → its own chat/URL
+    await rowByTitle(titleA).scrollIntoViewIfNeeded().catch(() => {});
+    await rowByTitle(titleA).dispatchEvent('click');
+    await page.waitForURL(/\/chat\/[^/]+$/, { timeout: 15_000 });
+    const urlA = page.url();
+
+    // Open B → a different chat
+    await rowByTitle(titleB).dispatchEvent('click');
+    await page.waitForURL((u) => /\/chat\/[^/]+$/.test(u.pathname) && u.href !== urlA, { timeout: 15_000 });
+    expect(page.url()).not.toBe(urlA);
+
+    // Return to A → A reloads its own thread (content preserved per chat).
+    await rowByTitle(titleA).dispatchEvent('click');
+    await page.waitForURL(urlA, { timeout: 15_000 });
+    expect(page.url()).toBe(urlA);
+    await expect(rowByTitle(titleA).first()).toBeVisible();
   });
 
   test('7.9 Share chat link generation', async ({ page }) => {
-    await createChat(page, 'Chat to share ' + Date.now());
-    test.skip(!(await openRowMenu(page)), 'Row context menu not locatable');
-    await page.getByText('Share', { exact: true }).filter({ visible: true }).first().click();
+    // Existing chat via dispatch (rows overlapped). Share -> POST /api/chat/{id}/share
+    // returns a public read-only link .../chat/shared/{token} (share/route.ts).
+    const rows = chatRows(page);
+    const before = await ensureChats(page);
+    const victim = rows.nth(Math.min(1, before - 1));
+    test.skip(!(await openRowMenuRobust(page, victim)), 'Row context menu not locatable');
+    await page.getByText('Share', { exact: true }).filter({ visible: true }).first().dispatchEvent('click');
+
+    // A public link is generated and copyable.
     await expect(page.getByRole('button', { name: 'Copy link' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.break-all').first()).toContainText('/chat/shared/', { timeout: 15_000 });
   });
 
   test('7.10 Open shared link as read-only', async ({ page, browser }) => {
-    await createChat(page, 'Chat shared readonly ' + Date.now());
-    test.skip(!(await openRowMenu(page)), 'Row context menu not locatable');
-    await page.getByText('Share', { exact: true }).filter({ visible: true }).first().click();
+    // Generate a share link on an existing chat (dispatch pattern), then open it in
+    // a fresh UNAUTHENTICATED context and verify the read-only viewer.
+    const rows = chatRows(page);
+    const before = await ensureChats(page);
+    const victim = rows.nth(Math.min(2, before - 1));
+    test.skip(!(await openRowMenuRobust(page, victim)), 'Row context menu not locatable');
+    await page.getByText('Share', { exact: true }).filter({ visible: true }).first().dispatchEvent('click');
     await expect(page.getByRole('button', { name: 'Copy link' })).toBeVisible({ timeout: 15_000 });
-    const shareUrl = await page.locator('.break-all').first().innerText().catch(() => '');
-    test.skip(!/https?:\/\//.test(shareUrl), 'No share URL was generated');
-    // Open the public link in a clean (unauthenticated) context
-    const ctx = await browser.newContext();
+    await expect(page.locator('.break-all').first()).toContainText('/chat/shared/', { timeout: 15_000 });
+    const shareUrl = (await page.locator('.break-all').first().innerText()).trim();
+
+    const ctx = await browser.newContext(); // clean, signed-out
     const viewer = await ctx.newPage();
-    await viewer.goto(shareUrl.trim());
-    // Read-only: no composer for the viewer
+    await viewer.goto(shareUrl);
+    // Conversation shown read-only: the "Shared Chat" view renders (not a login
+    // redirect / not-found) and there is NO composer/send input for the viewer.
+    await expect(viewer.getByText('Shared Chat').first()).toBeVisible({ timeout: 20_000 });
     await expect(viewer.locator('textarea')).toHaveCount(0);
     await ctx.close();
   });
 
   test('7.11 Revoke shared link', async ({ page }) => {
-    test.skip(true, 'No share-revoke UI exists in the app (tracked in Known Gaps Report)');
+    // PRODUCT GAP: share revoke is not implemented at all — no UI in
+    // share-dialog.tsx AND no API. app/api/chat/[chatId]/share/route.ts is
+    // POST-only (creates/returns a token); nothing ever sets is_shared=false or
+    // clears share_token. The shared-view route even has a "link has been
+    // revoked" message (app/api/chat/shared/[shareToken]/route.ts:19) that is
+    // currently unreachable. PDF 7.11 requires revoke, so it can't be tested.
+    test.skip(true, 'PRODUCT GAP: no share-revoke capability (no UI and no API to clear share_token). PDF 7.11 requires it.');
   });
 
   test('7.12 Regenerate a response', async ({ page }) => {
@@ -162,16 +315,27 @@ test.describe('Suite 7 — Chat Management', () => {
 
   test('7.13 Edit a previously sent message', async ({ page }) => {
     const original = 'Original message ' + Date.now();
-    await createChat(page, original);
-    const userMsg = page.getByText(original).first();
-    await userMsg.hover();
+    await sendMessage(page, original);
+    await waitForAssistantReply(page, 90_000);
+
+    // Hover the VISIBLE thread bubble (getByText also matches the hidden sidebar
+    // preview span, so filter to visible) and open its edit UI.
+    await page.getByText(original, { exact: true }).filter({ visible: true }).first().hover();
     const editBtn = page.getByRole('button', { name: 'Edit message' }).first();
     test.skip(!(await editBtn.count()), 'Edit-message action not locatable');
     await editBtn.click();
-    const editArea = page.locator('textarea').filter({ hasText: '' }).last();
-    await editArea.fill('Edited message content');
-    await page.getByRole('button', { name: 'Update' }).click();
-    await expect(page.getByText('Edited message content').first()).toBeVisible({ timeout: 20_000 });
+
+    // The edit box is the MessageEditUI textarea (min-h-[120px]), NOT the composer
+    // (the bare bottom textarea). It pre-fills with the original message.
+    const editArea = page.locator('textarea.min-h-\\[120px\\]').first();
+    await expect(editArea).toHaveValue(original, { timeout: 10_000 });
+    const edited = 'Edited message ' + Date.now();
+    await editArea.fill(edited);
+    await page.getByRole('button', { name: 'Update', exact: true }).click();
+
+    // Message updated in the thread, and the response is regenerated from the edit point.
+    await expect(page.getByText(edited, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+    await waitForAssistantReply(page, 90_000);
   });
 
   test('7.14 Empty state for no chats', async ({ page }) => {
@@ -208,34 +372,91 @@ test.describe('Suite 7 — Chat Management', () => {
   });
 
   test('7.18 Delete active chat updates view', async ({ page }) => {
-    await createChat(page, 'Active chat to delete ' + Date.now());
-    test.skip(!(await openRowMenu(page)), 'Row context menu not locatable');
-    await page.getByText('Delete', { exact: true }).filter({ visible: true }).first().click();
+    // Open a historical chat (making it the ACTIVE/open chat), delete it, and the
+    // main view must reset — app/chat/[id]/page.tsx:94-96 pushes to /chat when you
+    // delete the chat you're viewing. Operate on the ACTIVE row (immune to index
+    // drift). Distinct index from the other 7.x mutating tests.
+    const active = await openChatRow(page, 9);
+    test.skip(!(await openRowMenuRobust(page, active)), 'Row context menu not locatable');
+    await page.getByText('Delete', { exact: true }).filter({ visible: true }).first().dispatchEvent('click');
     await expect(page.getByText('Delete chat?')).toBeVisible();
-    await page.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).filter({ visible: true }).last().dispatchEvent('click');
+
+    // View resets gracefully: the redirect off /chat/[id] to the welcome screen
+    // only happens because the ACTIVE chat was deleted (handleDeleteChat pushes
+    // '/chat' when currentChatId === deleted id), so it proves both.
+    await page.waitForURL(/\/chat$/, { timeout: 15_000 });
     await expect(page.getByRole('heading', { name: /Let's orchestrate/i })).toBeVisible({ timeout: 20_000 });
   });
 
   test('7.19 Renaming a chat while a response is streaming', async ({ page }) => {
-    await createChat(page, 'Write a long paragraph about the sea, streaming please.');
-    await page.waitForTimeout(1500); // let streaming begin
-    test.skip(!(await openRowMenu(page)), 'Row context menu not locatable mid-stream');
-    await page.getByText('Rename', { exact: true }).filter({ visible: true }).first().click();
-    const input = page.locator('input[autofocus], .bg-sidebar-hover input').first();
-    await input.fill('Renamed Mid Stream');
+    // Open an EXISTING chat (its sidebar row is present, unlike a new chat), start
+    // a long stream in it, then rename the ACTIVE row mid-stream. Using the active
+    // row (bg-sidebar-hover) targets exactly the chat we opened even if titles
+    // collide. Distinct row index for parallel safety.
+    const rows = chatRows(page);
+    const before = await ensureChats(page);
+    await rows.nth(Math.min(11, before - 1)).dispatchEvent('click');
+    await page.waitForURL(/\/chat\/[^/]+$/, { timeout: 15_000 });
+
+    // Start a long response, then rename immediately (mid-stream — do NOT wait).
+    await sendMessage(page, 'Write about 12 numbered paragraphs on the ocean, in detail.');
+    const active = page.locator('.bg-sidebar-hover.h-\\[32px\\]').first();
+    test.skip(!(await openRowMenuRobust(page, active)), 'Row context menu not locatable mid-stream');
+    await page.getByText('Rename', { exact: true }).filter({ visible: true }).first().dispatchEvent('click');
+    const newName = 'Renamed mid ' + Date.now();
+    const input = page.locator('div.h-\\[32px\\] input').first();
+    await input.waitFor({ state: 'visible', timeout: 5_000 });
+    await input.fill(newName);
+    const saved = page.waitForResponse(
+      (r) => /\/api\/chat\/[^/]+\/title$/.test(r.url()) && r.request().method() === 'PUT',
+      { timeout: 15_000 }
+    );
     await input.press('Enter');
-    // Stream still completes and the new title is applied
+    expect((await saved).ok(), 'rename should persist mid-stream').toBeTruthy();
+
+    // Streaming was NOT interrupted by the rename — it still completes — and the
+    // new title applied.
     await waitForAssistantReply(page, 90_000);
-    await expect(page.getByText('Renamed Mid Stream').filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('div.h-\\[32px\\]', { hasText: newName }).first()).toBeVisible({ timeout: 15_000 });
   });
 
   test('7.20 Deleting a chat with an in-flight request cancels it cleanly', async ({ page }) => {
-    await createChat(page, 'Send then immediately delete ' + Date.now());
-    // Immediately delete while the response is still in flight
-    test.skip(!(await openRowMenu(page)), 'Row context menu not locatable');
-    await page.getByText('Delete', { exact: true }).filter({ visible: true }).first().click();
-    await page.getByRole('button', { name: 'Delete' }).click();
-    // No orphaned state / crash — app returns to a clean welcome view
-    await expect(page.getByRole('heading', { name: /Let's orchestrate/i })).toBeVisible({ timeout: 20_000 });
+    // Track the in-flight chat POST to see whether deleting the chat aborts it
+    // (correct) or lets it finish (bug).
+    const chatPost = { status: 'none' };
+    const isChat = (r: import('@playwright/test').Request) =>
+      /\/api\/chat(\?|$)/.test(r.url()) && r.method() === 'POST';
+    page.on('request', (r) => { if (isChat(r) && chatPost.status === 'none') chatPost.status = 'pending'; });
+    page.on('requestfinished', (r) => { if (isChat(r) && chatPost.status === 'pending') chatPost.status = 'finished'; });
+    page.on('requestfailed', (r) => { if (isChat(r) && chatPost.status === 'pending') chatPost.status = 'aborted'; });
+
+    // Open an existing chat, start a long send (in-flight), then immediately
+    // delete the active chat before the response completes.
+    const rows = chatRows(page);
+    const before = await ensureChats(page);
+    await rows.nth(Math.min(13, before - 1)).dispatchEvent('click');
+    await page.waitForURL(/\/chat\/[^/]+$/, { timeout: 15_000 });
+    await sendMessage(page, 'Write about 12 numbered paragraphs on the ocean in detail.');
+
+    const active = page.locator('.bg-sidebar-hover.h-\\[32px\\]').first();
+    test.skip(!(await openRowMenuRobust(page, active)), 'Row context menu not locatable mid-flight');
+    await page.getByText('Delete', { exact: true }).filter({ visible: true }).first().dispatchEvent('click');
+    await expect(page.getByText('Delete chat?')).toBeVisible();
+    await page.getByRole('button', { name: 'Delete', exact: true }).filter({ visible: true }).last().dispatchEvent('click');
+    await page.waitForURL(/\/chat$/, { timeout: 15_000 });
+
+    // Wait for the request to resolve one way or the other.
+    await expect.poll(() => chatPost.status, { timeout: 25_000 }).not.toBe('pending');
+
+    // PDF: deleting the chat mid-send ABORTS the request; no orphaned message.
+    // PRODUCT BUG: handleDeleteChat (app/chat/[id]/page.tsx) never calls the
+    // StreamManager's stopStream, so the request FINISHES and the response streams
+    // onto the welcome view as an orphan. This asserts the correct behaviour and
+    // will pass once delete aborts the in-flight stream.
+    expect(
+      chatPost.status,
+      'PRODUCT BUG: in-flight chat request is not aborted when the chat is deleted (streams an orphaned reply onto the view)'
+    ).toBe('aborted');
   });
 });

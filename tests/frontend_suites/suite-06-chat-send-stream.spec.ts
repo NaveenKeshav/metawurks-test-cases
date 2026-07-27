@@ -112,8 +112,22 @@ test.describe('Suite 6 — Chat Send/Stream', () => {
     test.skip(!(await chatFileInput.count()), 'No file attachment input available in composer for this model');
     await chatFileInput.first().setInputFiles(fixture('notes.txt'));
     await composer(page).fill('Summarize the attached file.');
-    // The attachment chip/name should surface before/after sending
-    await expect(page.getByText(/notes\.txt/i)).toBeVisible({ timeout: 15_000 });
+
+    // The attachment chip must surface in the COMPOSER. "notes.txt" also appears
+    // many times elsewhere (sidebar, data library) for this account, so scope to
+    // the input bar that wraps the composer textarea to avoid a strict-mode
+    // match on unrelated document rows.
+    const inputBar = page
+      .locator('div')
+      .filter({ has: composer(page) })
+      .filter({ hasText: /notes\.txt/i })
+      .last();
+    await expect(inputBar.getByText(/notes\.txt/i).first()).toBeVisible({ timeout: 15_000 });
+
+    // Send: the attachment + text appear in the thread and the AI responds
+    // (acknowledges the context), per the PDF.
+    await composer(page).press('Enter');
+    await waitForAssistantReply(page, 90_000);
   });
 
   test('6.11 Unicode and emoji in message', async ({ page }) => {
@@ -155,9 +169,12 @@ test.describe('Suite 6 — Chat Send/Stream', () => {
       })
     );
     await sendMessage(page, 'Send when credits are exhausted.');
-    // The 402 surfaces the upgrade dialog, not a raw error
-    await expect(page.getByText('Monthly Token Limit Reached')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole('button', { name: 'Upgrade Plan' })).toBeVisible();
+    // The 402 surfaces the upgrade dialog, not a raw error. Scope to the dialog
+    // (the mock's body text "Monthly token limit reached" also matches the
+    // case-insensitive title, so an unscoped getByText is ambiguous).
+    const dialog = page.getByRole('dialog', { name: 'Monthly Token Limit Reached' });
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByRole('button', { name: 'Upgrade Plan' })).toBeVisible();
   });
 
   test('6.15 Send with Enter vs Shift+Enter newline', async ({ page }) => {
@@ -185,16 +202,18 @@ test.describe('Suite 6 — Chat Send/Stream', () => {
   });
 
   test('6.17 Send button disabled while awaiting a prior response', async ({ page }) => {
-    await sendMessage(page, 'Write a medium-length paragraph about mountains.');
-    // While streaming, a second Enter must not immediately create a duplicate
-    // user message (the send affordance is replaced by Stop).
-    await page.waitForTimeout(1500);
-    const before = await page.getByText('Write a medium-length paragraph about mountains.').count();
-    await composer(page).fill('Second attempt while busy');
-    await composer(page).press('Enter').catch(() => {});
-    await page.waitForTimeout(500);
-    const firstStill = await page.getByText('Write a medium-length paragraph about mountains.').count();
-    expect(firstStill).toBe(before); // first message not duplicated
+    // Ask for a long reply so the stream lasts long enough to observe.
+    await sendMessage(page, 'Write about 10 numbered paragraphs on mountains, in detail.');
+    // While the response streams, the Send button is REPLACED by a Stop control
+    // (ChatInputBar: isStreaming ? Stop : Send), so a normal second send is not
+    // available. The Stop control has a distinctive inner square. This is the
+    // deterministic signal — counting message occurrences was flaky because the
+    // text also appears in the async-updating sidebar preview.
+    const stopSquare = page.locator('div.w-\\[11px\\].h-\\[11px\\].rounded-sm');
+    await expect(stopSquare.first()).toBeVisible({ timeout: 15_000 });
+    // Once the reply completes, the Stop control disappears (Send restored).
+    await waitForAssistantReply(page, 90_000);
+    await expect(stopSquare).toHaveCount(0, { timeout: 15_000 });
   });
 
   test('6.18 Chat input preserves/discards draft across navigation without corruption', async ({ page }) => {

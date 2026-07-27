@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openDashboard } from '../shared/auth-helper';
-import { composer, sendMessage } from '../shared/app-helpers';
+import { composer, sendMessage, waitForAssistantReply } from '../shared/app-helpers';
 
 /**
  * Suite 8 — Model Selection & Chat UI  (PDF TC 8.1–8.12)
@@ -17,7 +17,7 @@ import { composer, sendMessage } from '../shared/app-helpers';
 /** The composer model selector shows "Auto" (default) or a model name. */
 function modelSelector(page: import('@playwright/test').Page) {
   return page
-    .getByRole('button', { name: /^(Auto|Kimi|GPT-|Claude|Gemini|Grok|DeepSeek|Perplexity)/ })
+    .getByRole('button', { name: /^(Auto|Kimi|GPT-|Claude|Sonnet|Gemini|Qwen|Grok|DeepSeek|Perplexity)/ })
     .first();
 }
 
@@ -31,18 +31,29 @@ test.describe('Suite 8 — Model Selection & Chat UI', () => {
 
   test('8.1 Open model dropdown', async ({ page }) => {
     await modelSelector(page).click();
-    // Dropdown lists Auto + concrete models
+    // Dropdown lists Auto + the concrete models. Labels come from
+    // lib/models-config.ts — the Sonnet entry is "Sonnet 4.6" (not "Claude Sonnet 4.6").
     await expect(page.getByText('Selects the best available models')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText('Claude Sonnet 4.6').filter({ visible: true }).first()).toBeVisible();
+    for (const name of ['Sonnet 4.6', 'Kimi K2.6', 'Gemini 3 Flash']) {
+      await expect(page.getByText(name, { exact: true }).filter({ visible: true }).first()).toBeVisible();
+    }
   });
 
   test('8.2 Switch to a different model', async ({ page }) => {
     await modelSelector(page).click();
-    await page.getByText('Claude Sonnet 4.6').filter({ visible: true }).first().click();
-    // Selector reflects the choice and it is persisted
-    await expect(page.getByRole('button', { name: /Claude Sonnet 4\.6/ }).first()).toBeVisible();
-    const stored = await page.evaluate(() => localStorage.getItem('selectedModel'));
-    expect(stored).toBe('claude-4.6');
+    // Label is "Sonnet 4.6" (id 'claude-4.6') — lib/models-config.ts.
+    await page.getByText('Sonnet 4.6', { exact: true }).filter({ visible: true }).first().click();
+    // Selection updates and is persisted.
+    await expect(page.getByRole('button', { name: /Sonnet 4\.6/ }).first()).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('selectedModel'))).toBe('claude-4.6');
+
+    // Next message uses the new model: the chat request carries selectedModel.
+    const chatReq = page.waitForRequest(
+      (r) => /\/api\/chat(\?|$)/.test(r.url()) && r.method() === 'POST',
+      { timeout: 20_000 }
+    );
+    await sendMessage(page, 'Reply with just: ok');
+    expect((await chatReq).postDataJSON()?.selectedModel).toBe('claude-4.6');
   });
 
   test('8.3 Selected model persists after refresh', async ({ page }) => {
@@ -75,32 +86,47 @@ test.describe('Suite 8 — Model Selection & Chat UI', () => {
   });
 
   test('8.6 Sidebar collapse and expand', async ({ page }) => {
-    const toggle = page.locator('button').filter({ has: page.locator('svg.lucide-panel-left') }).first();
-    test.skip(!(await toggle.count()), 'Sidebar collapse toggle not present');
-    await toggle.click();
-    await page.waitForTimeout(500);
-    await toggle.click().catch(() => {});
-    await expect(composer(page)).toBeVisible();
+    // The expanded sidebar shows the "Conversations" header; collapsing hides it
+    // (sidebar.tsx renders a narrow icon bar when collapsed).
+    const convHeader = page.getByText('Conversations', { exact: true }).first();
+    await expect(convHeader).toBeVisible({ timeout: 15_000 });
+    const toggle = () => page.locator('button').filter({ has: page.locator('svg.lucide-panel-left') }).first();
+    test.skip(!(await toggle().count()), 'Sidebar collapse toggle not present');
+
+    await toggle().click();
+    await expect(convHeader).toBeHidden({ timeout: 10_000 }); // collapsed
+    // The collapsed bar has no panel-left icon; its logo button re-toggles.
+    await page.locator('button').filter({ has: page.locator('img[alt="MetaWurks"]') }).first().click();
+    await expect(convHeader).toBeVisible({ timeout: 10_000 }); // expanded again
   });
 
   test('8.7 Copy message via copy button', async ({ page }) => {
-    await sendMessage(page, 'Copy me please ' + Date.now());
-    const msg = page.getByText(/Copy me please/).first();
-    await msg.hover();
-    const copyBtn = page.locator('button[title="Copy message"]').first();
-    test.skip(!(await copyBtn.count()), 'Copy-message button not locatable');
-    await copyBtn.click();
-    await expect(page.getByText('Copied').first()).toBeVisible({ timeout: 10_000 });
+    const msg = 'Copy me please ' + Date.now();
+    await sendMessage(page, msg);
+    // The copy button (message-actions.tsx: title="Copy message") and its "Copied"
+    // label are hover-gated/conditionally rendered (MessageItem: showUserActions),
+    // so the UI text is flaky. Verify the actual effect via the clipboard instead
+    // (clipboard perms are granted for this suite).
+    const copyBtn = page.locator('button[title="Copy message"]').last();
+    await expect(copyBtn).toBeAttached({ timeout: 15_000 });
+    await copyBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await copyBtn.click({ force: true });
+    await expect
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 10_000 })
+      .toContain(msg);
   });
 
   test('8.8 Scroll-to-bottom button', async ({ page }) => {
-    await sendMessage(page, 'Give me ten short bullet points about space.');
-    await page.waitForTimeout(3000);
-    await page.mouse.wheel(0, -1500); // scroll up
+    // Need a long, scrollable conversation: the button only renders when the user
+    // has scrolled up (ChatInterface: isUserScrolledUp).
+    await sendMessage(page, 'Write 15 numbered paragraphs about space exploration, two sentences each.');
+    await waitForAssistantReply(page, 90_000);
+    await page.mouse.move(640, 300);
+    await page.mouse.wheel(0, -4000); // scroll up in the messages area
     const btn = page.getByRole('button', { name: 'Scroll to bottom' });
-    test.skip(!(await btn.count()), 'Scroll-to-bottom button not shown (chat not long enough)');
+    await expect(btn).toBeVisible({ timeout: 10_000 });
     await btn.click();
-    await expect(btn).toBeHidden({ timeout: 10_000 }).catch(() => {});
+    await expect(btn).toBeHidden({ timeout: 10_000 });
   });
 
   test('8.9 Typing indicator during response', async ({ page }) => {
@@ -116,17 +142,18 @@ test.describe('Suite 8 — Model Selection & Chat UI', () => {
     await expect(page.getByText(/\b\d{1,2}:\d{2}\s?(AM|PM)\b/i).first()).toBeVisible({ timeout: 30_000 });
   });
 
-  test('8.11 Dark/light theme toggle (Settings → Appearance)', async ({ page }) => {
-    // There is no in-chat theme toggle; theme is set in Settings → Appearance.
+  test('8.11 Dark/light theme toggle (Settings → Preferences)', async ({ page }) => {
+    // No in-chat theme toggle; theme lives in Settings → Preferences as clickable
+    // theme CARDS (not a <select>). /settings redirects to /chat?settings=true.
     await page.goto('/settings');
-    const themeSelect = page.getByLabel(/Theme/i).first();
-    test.skip(!(await themeSelect.count()), 'Appearance theme control not reachable in this environment');
-    await themeSelect.selectOption({ label: 'Dark' }).catch(async () => {
-      await themeSelect.selectOption('dark').catch(() => {});
-    });
-    await page.waitForTimeout(500);
-    const isDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
-    expect(isDark).toBeTruthy();
+    await page.waitForURL(/settings=true/, { timeout: 15_000 }).catch(() => {});
+    await page.getByRole('button', { name: 'Preferences', exact: true }).first().click().catch(() => {});
+    const darkCard = page.getByRole('button', { name: 'Dark', exact: true }).first();
+    await expect(darkCard).toBeVisible({ timeout: 15_000 });
+    await darkCard.click();
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.classList.contains('dark')), { timeout: 10_000 })
+      .toBe(true);
   });
 
   test('8.12 Auto mode selects only enabled models', async ({ page }) => {

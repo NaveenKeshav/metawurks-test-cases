@@ -105,18 +105,35 @@ test.describe('Suite 4 — OAuth & Route Protection (authenticated)', () => {
     await expect(page.getByText('Sign in to MetaWurks')).toBeVisible();
   });
 
-  test('4.8 Back button after logout does not restore session', async ({ page }) => {
+  test('4.8 Back button after logout does not restore session', async ({ page, context }) => {
     await page.goto('/chat');
     await page.getByRole('heading', { name: /Let's orchestrate/i }).waitFor({ timeout: 20_000 });
     await page.getByRole('button', { name: /Plan/i }).first().click();
     await page.getByText('Log out').click();
     await page.getByRole('button', { name: 'Yes' }).click();
     await page.waitForURL(/\/login/, { timeout: 20_000 });
-    // Browser Back must not reveal protected content
+
+    // Logout itself works: the session cookie is cleared and a hard reload of
+    // /chat redirects to /login via proxy.ts (verified). The bug is bfcache.
+    const sessionGone = !(await context.cookies()).some((c) => /next-auth\.session-token/.test(c.name));
+    expect(sessionGone, 'logout should clear the session cookie').toBe(true);
+
     await page.goBack();
     await page.waitForTimeout(1500);
-    await expect(page.getByRole('heading', { name: /Let's orchestrate/i })).toHaveCount(0);
-    expect(page.url()).not.toMatch(/\/chat(\/|$)/);
+
+    // PRODUCT BUG (PDF 4.8, High): pressing Back restores the previous /chat
+    // page from the browser's back/forward cache (navigation type
+    // "back_forward"), which bypasses the network so proxy.ts never runs and
+    // the prior user's protected content is exposed. Protected pages are served
+    // without Cache-Control: no-store, keeping them bfcache-eligible.
+    // Fix (app side): set no-store on protected responses in proxy.ts, or add a
+    // pageshow/event.persisted guard that forces a reload. This assertion is
+    // meant to FAIL until that ships — do not weaken it to green.
+    await expect(
+      page.getByRole('heading', { name: /Let's orchestrate/i }),
+      'PRODUCT BUG: Back after logout restores cached /chat from bfcache (no no-store on protected pages)'
+    ).toHaveCount(0);
+    expect(page.url(), 'should be redirected off /chat after Back').not.toMatch(/\/chat(\/|$)/);
   });
 
   test('4.10 Authenticated user visiting /login is NOT redirected', async ({ page }) => {
