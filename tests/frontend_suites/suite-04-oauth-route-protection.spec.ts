@@ -84,17 +84,17 @@ test.describe('Suite 4 — OAuth & Route Protection (logged out)', () => {
 test.describe('Suite 4 — OAuth & Route Protection (authenticated)', () => {
 
   test('4.6 Access token expiry mid-session redirects to login', async ({ page, context }) => {
-    await page.goto('/chat');
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: /Let's orchestrate/i })).toBeVisible({ timeout: 20_000 });
     // Simulate token expiry by dropping the session cookie, then navigate.
     await context.clearCookies();
-    await page.goto('/chat');
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
     await page.waitForURL(/\/login/, { timeout: 15_000 });
     expect(page.url()).toContain('/login');
   });
 
   test('4.7 Logout clears session and returns to login', async ({ page }) => {
-    await page.goto('/chat');
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
     await page.getByRole('heading', { name: /Let's orchestrate/i }).waitFor({ timeout: 20_000 });
     // Open the sidebar user-profile menu, then Log out → confirm
     await page.getByRole('button', { name: /Plan/i }).first().click();
@@ -106,10 +106,14 @@ test.describe('Suite 4 — OAuth & Route Protection (authenticated)', () => {
   });
 
   test('4.8 Back button after logout does not restore session', async ({ page, context }) => {
-    await page.goto('/chat');
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
     await page.getByRole('heading', { name: /Let's orchestrate/i }).waitFor({ timeout: 20_000 });
     await page.getByRole('button', { name: /Plan/i }).first().click();
     await page.getByText('Log out').click();
+    // Wait for the confirm dialog to render before clicking Yes — clicking too
+    // early (before the dialog mounts) can miss the button and the logout never
+    // fires. Mirrors 4.7's guard.
+    await expect(page.getByText('Confirm Logout')).toBeVisible();
     await page.getByRole('button', { name: 'Yes' }).click();
     await page.waitForURL(/\/login/, { timeout: 20_000 });
 
@@ -142,7 +146,7 @@ test.describe('Suite 4 — OAuth & Route Protection (authenticated)', () => {
     // remains valid.
     await page.goto('/login');
     await expect(page.getByText('Sign in to MetaWurks')).toBeVisible();
-    await page.goto('/chat');
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: /Let's orchestrate/i })).toBeVisible({ timeout: 20_000 });
   });
 });

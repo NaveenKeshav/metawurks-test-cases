@@ -40,8 +40,15 @@ test.describe('Suite 20 — Login deep edge cases', () => {
     await page.getByLabel(emailField).fill('tëst@münchen.de');
     await page.getByLabel(pwField).fill('SomePassword123');
     await page.getByRole('button', signInBtn).click();
-    // Processed without a normalization crash — generic error, still on /login
-    await expect(page.getByText(invalidError).or(page.getByText(/valid email/i))).toBeVisible({ timeout: 30_000 });
+    // PRODUCT BUG (PDF 20.2): submitting a Unicode/IDN email (tëst@münchen.de)
+    // with bad credentials shows NO "Invalid email or password" / "valid email"
+    // feedback — the login form gives no visible error for the IDN case, leaving
+    // the user with no indication the attempt failed. This assertion is meant to
+    // FAIL until the app surfaces an error for IDN/Unicode emails.
+    await expect(
+      page.getByText(invalidError).or(page.getByText(/valid email/i)),
+      'PRODUCT BUG: no error feedback shown when logging in with a Unicode/IDN email (PDF 20.2 expects a validation/invalid-credentials message)'
+    ).toBeVisible({ timeout: 30_000 });
     expect(page.url()).toContain('/login');
   });
 
@@ -138,8 +145,14 @@ test.describe('Suite 20 — Login deep edge cases', () => {
       form: { email: 'x@example.com', password: 'y', json: 'true' },
       failOnStatusCode: false,
     });
-    // NextAuth rejects (no session issued): not a 200 success redirect to /chat
-    expect(res.status()).not.toBe(200);
+    // PRODUCT BUG (PDF 20.10, security): a credentials callback POST made WITHOUT
+    // a valid CSRF token is accepted with HTTP 200 instead of being rejected. The
+    // login endpoint does not enforce CSRF protection on the callback. This
+    // assertion is meant to FAIL until CSRF is enforced (reject with non-200).
+    expect(
+      res.status(),
+      `PRODUCT BUG: login callback POST without a CSRF token returned ${res.status()} (CSRF not enforced on /api/auth/callback/credentials)`
+    ).not.toBe(200);
   });
 
   test('20.11 XSS payload in email field is neutralized', async ({ page }) => {
@@ -189,8 +202,14 @@ test.describe('Suite 20 — Login deep edge cases', () => {
     await page.waitForURL(/\/chat/, { timeout: 30_000 });
     await page.goBack();
     await page.waitForTimeout(1000);
-    // Still authenticated — Back does not strand us on a resubmittable form
-    expect(page.url()).not.toContain('/login');
+    // PRODUCT BUG (PDF 20.14): pressing Back after a successful login returns the
+    // user to the cached /login form (a stale, resubmittable page) instead of
+    // keeping them on the authenticated app. This assertion is meant to FAIL
+    // until Back no longer strands an authenticated user on /login.
+    expect(
+      page.url(),
+      'PRODUCT BUG: Back after login lands on the stale /login form (resubmittable) instead of staying authenticated (PDF 20.14)'
+    ).not.toContain('/login');
   });
 
   test('20.15 Show/hide password toggle does not leak value after navigation', async ({ page }) => {

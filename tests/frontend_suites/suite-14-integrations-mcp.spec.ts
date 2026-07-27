@@ -1,5 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import { openDashboard } from '../shared/auth-helper';
+import { openIntegrations } from '../shared/app-helpers';
 
 /**
  * Suite 14 — Integrations & MCP  (PDF TC 14.1–14.12)
@@ -15,14 +16,22 @@ import { openDashboard } from '../shared/auth-helper';
  */
 
 async function openIntegrationsPage(page: Page) {
-  await page.getByRole('button', { name: 'Integrations' }).click();
-  await expect(page.getByText('Integrations').first()).toBeVisible({ timeout: 10_000 });
+  // Integrations lives under the sidebar's "Knowledge Source" nav item as a
+  // clickable <div> (NOT a button), so use the shared helper that expands
+  // Knowledge Source and clicks the Integrations sub-item, then waits for the
+  // Gmail card to confirm the panel rendered.
+  await openIntegrations(page);
 }
 
+/** Open the Custom MCP modal and return the modal overlay locator. */
 async function openCustomMcpModal(page: Page) {
   await openIntegrationsPage(page);
   await page.getByRole('button', { name: 'Add Custom MCP' }).first().click();
   await expect(page.getByPlaceholder('e.g. My Notion MCP')).toBeVisible({ timeout: 10_000 });
+  // The Integrations panel has ~15 per-card "Connect" buttons; scope actions to
+  // the modal overlay (the z-50 container holding the MCP name input) so the
+  // modal's own Connect submit is unambiguous.
+  return page.locator('div.z-50').filter({ has: page.getByPlaceholder('e.g. My Notion MCP') }).first();
 }
 
 test.describe('Suite 14 — Integrations & MCP', () => {
@@ -42,10 +51,10 @@ test.describe('Suite 14 — Integrations & MCP', () => {
   test('14.2 Connect an MCP server (valid config enables Connect)', async ({ page }) => {
     // Full connect needs a live MCP server; assert the modal accepts a valid
     // config and enables the Connect action.
-    await openCustomMcpModal(page);
+    const modal = await openCustomMcpModal(page);
     await page.getByPlaceholder('e.g. My Notion MCP').fill('My Test MCP');
     await page.getByPlaceholder('https://your-mcp-server.com/mcp').fill('https://example.com/mcp');
-    await expect(page.getByRole('button', { name: 'Connect' })).toBeEnabled();
+    await expect(modal.getByRole('button', { name: 'Connect' })).toBeEnabled();
   });
 
   test('14.3 Custom MCP OAuth connection', async ({ page }) => {
@@ -66,13 +75,13 @@ test.describe('Suite 14 — Integrations & MCP', () => {
   });
 
   test('14.6 Invalid MCP config rejected', async ({ page }) => {
-    await openCustomMcpModal(page);
+    const modal = await openCustomMcpModal(page);
     // Missing fields
-    await page.getByRole('button', { name: 'Connect' }).click({ force: true }).catch(() => {});
+    await modal.getByRole('button', { name: 'Connect' }).click({ force: true }).catch(() => {});
     // Invalid URL
     await page.getByPlaceholder('e.g. My Notion MCP').fill('Bad Config');
     await page.getByPlaceholder('https://your-mcp-server.com/mcp').fill('not-a-valid-url');
-    await page.getByRole('button', { name: 'Connect' }).click();
+    await modal.getByRole('button', { name: 'Connect' }).click();
     await expect(page.getByText(/Please enter a valid URL|Both name and URL are required/i)).toBeVisible({ timeout: 10_000 });
   });
 

@@ -31,21 +31,22 @@ test.describe('Suite 8 — Model Selection & Chat UI', () => {
 
   test('8.1 Open model dropdown', async ({ page }) => {
     await modelSelector(page).click();
-    // Dropdown lists Auto + the concrete models. Labels come from
-    // lib/models-config.ts — the Sonnet entry is "Sonnet 4.6" (not "Claude Sonnet 4.6").
+    // Dropdown lists Auto + the concrete models enabled for this account.
+    // dev2 currently exposes GPT-5.5, Gemini 3 Flash, Grok 4.3, DeepSeek V4
+    // Flash and Perplexity Sonar Pro (Sonnet/Kimi are not enabled here).
     await expect(page.getByText('Selects the best available models')).toBeVisible({ timeout: 10_000 });
-    for (const name of ['Sonnet 4.6', 'Kimi K2.6', 'Gemini 3 Flash']) {
+    for (const name of ['GPT-5.5', 'Gemini 3 Flash', 'Grok 4.3']) {
       await expect(page.getByText(name, { exact: true }).filter({ visible: true }).first()).toBeVisible();
     }
   });
 
   test('8.2 Switch to a different model', async ({ page }) => {
     await modelSelector(page).click();
-    // Label is "Sonnet 4.6" (id 'claude-4.6') — lib/models-config.ts.
-    await page.getByText('Sonnet 4.6', { exact: true }).filter({ visible: true }).first().click();
+    // Switch to GPT-5.5 (id 'gpt-5.5') — a model enabled on dev2 for this account.
+    await page.getByText('GPT-5.5', { exact: true }).filter({ visible: true }).first().click();
     // Selection updates and is persisted.
-    await expect(page.getByRole('button', { name: /Sonnet 4\.6/ }).first()).toBeVisible();
-    expect(await page.evaluate(() => localStorage.getItem('selectedModel'))).toBe('claude-4.6');
+    await expect(page.getByRole('button', { name: /GPT-5\.5/ }).first()).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('selectedModel'))).toBe('gpt-5.5');
 
     // Next message uses the new model: the chat request carries selectedModel.
     const chatReq = page.waitForRequest(
@@ -53,7 +54,7 @@ test.describe('Suite 8 — Model Selection & Chat UI', () => {
       { timeout: 20_000 }
     );
     await sendMessage(page, 'Reply with just: ok');
-    expect((await chatReq).postDataJSON()?.selectedModel).toBe('claude-4.6');
+    expect((await chatReq).postDataJSON()?.selectedModel).toBe('gpt-5.5');
   });
 
   test('8.3 Selected model persists after refresh', async ({ page }) => {

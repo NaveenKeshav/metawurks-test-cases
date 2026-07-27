@@ -87,9 +87,14 @@ test.describe('Suite 21 — Signup deep edge cases', () => {
   });
 
   test('21.6 Expired reCAPTCHA forces re-verification', async ({ page }) => {
+    // An expired token is rejected server-side: the real /api/recaptcha/verify
+    // returns HTTP 400 (route.ts — score null for invalid tokenProperties). The
+    // app gates on `!recaptchaResponse.ok`, so reproduce that failure with 400.
+    // (A 200 body of {success:false} reads as .ok and lets the submission run on
+    // to the real /api/signup — creating a junk account.)
     await mockRecaptcha(page);
     await page.route('**/api/recaptcha/verify', (r) =>
-      r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: false }) })
+      r.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'reCAPTCHA verification failed' }) })
     );
     await page.goto(signupUrl);
     await fillValid(page);
@@ -98,10 +103,13 @@ test.describe('Suite 21 — Signup deep edge cases', () => {
   });
 
   test('21.7 reCAPTCHA token replay rejected', async ({ page }) => {
-    // Simulate the server rejecting a consumed/replayed token.
+    // A consumed/replayed token is rejected server-side with HTTP 400
+    // ("timeout-or-duplicate" invalidReason → score null → 400 in route.ts).
+    // Reproduce that real failure response; the app must surface the error and
+    // NOT proceed to /api/signup.
     await mockRecaptcha(page);
     await page.route('**/api/recaptcha/verify', (r) =>
-      r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'timeout-or-duplicate' }) })
+      r.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'reCAPTCHA verification failed', reason: 'timeout-or-duplicate' }) })
     );
     await page.goto(signupUrl);
     await fillValid(page);

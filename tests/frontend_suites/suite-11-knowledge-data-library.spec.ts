@@ -84,12 +84,19 @@ test.describe('Suite 11 — Knowledge / Data Library', () => {
     // Click Delete in the row menu (exact, so it is not confused with sidebar rows).
     const del = page.getByRole('button', { name: 'Delete', exact: true }).filter({ visible: true }).first();
     await expect(del, 'Delete action not locatable in the row menu').toBeVisible({ timeout: 10_000 });
+    // The library holds many identically-named documents (e.g. dozens of
+    // sample.pdf from prior uploads) and paginates, so a name-based "count 0"
+    // check is unsound — a deleted row is backfilled by another same-named doc.
+    // Verify deletion genuinely at the backend: the app issues
+    // DELETE /api/documents/<id> and must get a success response.
+    const delResp = page.waitForResponse(
+      (r) => r.request().method() === 'DELETE' && /\/api\/documents\//.test(r.url()),
+      { timeout: 15_000 }
+    ).catch(() => null);
     await del.click({ timeout: 10_000 });
-    // After confirming, the document is removed from the list (optimistic delete).
-    await expect(
-      page.getByText(name, { exact: false }).filter({ visible: true }),
-      `document "${name}" should be removed after delete`
-    ).toHaveCount(0, { timeout: 15_000 });
+    const resp = await delResp;
+    expect(resp, `deleting "${name}" should send DELETE /api/documents/<id>`).toBeTruthy();
+    expect(resp!.ok(), `document delete API should succeed (got ${resp?.status()})`).toBeTruthy();
   });
 
   test('11.5 Cancel document delete', async ({ page }) => {
@@ -156,10 +163,15 @@ test.describe('Suite 11 — Knowledge / Data Library', () => {
     await firstRowKebab(page).click();
     const dl = page.getByRole('button', { name: 'Download' }).filter({ visible: true }).first();
     test.skip(!(await dl.count()), 'Download action not locatable');
-    // Download opens the doc URL in a new tab / triggers a download
+    // Clicking Download points the browser at the document's actual storage
+    // object (GCS), genuinely serving the file. Depending on the file's
+    // content-disposition this either navigates the tab (text shown inline) or
+    // triggers a browser download (navigation aborts) — so assert on the storage
+    // REQUEST, which fires either way, rather than the final page URL.
+    const fileReq = page.waitForRequest(/storage\.(googleapis|cloud\.google)\.com/i, { timeout: 15_000 }).catch(() => null);
     await dl.click();
-    await page.waitForTimeout(1000);
-    await expect(page.getByText('Data Library').first()).toBeVisible();
+    const req = await fileReq;
+    expect(req, 'Download should request the stored file object from GCS').toBeTruthy();
   });
 
   test('11.15 Search with no matching results', async ({ page }) => {

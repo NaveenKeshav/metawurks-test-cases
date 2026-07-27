@@ -32,7 +32,12 @@ export async function loginWithEnvCredentials(page: Page): Promise<void> {
  * dashboard (WelcomeScreen) to be ready.
  */
 export async function openDashboard(page: Page): Promise<void> {
-  await page.goto('/chat');
+  // Use domcontentloaded, not the default 'load': the chat page holds a
+  // persistent stream connection that keeps the browser 'load' event from
+  // firing, so under parallel-worker contention a plain goto('/chat') can hang
+  // until the test times out. waitForDashboardLoad's heading check is the real
+  // readiness signal.
+  await page.goto('/chat', { waitUntil: 'domcontentloaded' });
   await waitForDashboardLoad(page);
 }
 

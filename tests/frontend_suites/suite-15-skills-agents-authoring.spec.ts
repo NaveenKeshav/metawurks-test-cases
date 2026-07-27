@@ -96,9 +96,15 @@ test.describe('Suite 15 — Skills/Agents Authoring', () => {
 
   test('15.10 List all skills', async ({ page }) => {
     await openAgents(page);
-    await expect(
-      page.getByText(/No skills yet/i).or(page.locator('ul').first())
-    ).toBeVisible();
+    // The Agents panel shows either the "No skills yet" empty state or a list of
+    // skill cards. Branch on which is present (avoids a strict-mode-ambiguous
+    // .or() union) and assert the corresponding surface renders.
+    const empty = page.getByText(/No skills yet/i);
+    if (await empty.count()) {
+      await expect(empty.first()).toBeVisible();
+    } else {
+      await expect(page.locator('ul').first()).toBeVisible();
+    }
   });
 
   test('15.11 Fork an existing skill', async ({ page }) => {

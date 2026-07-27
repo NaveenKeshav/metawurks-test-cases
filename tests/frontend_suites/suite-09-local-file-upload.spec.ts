@@ -67,16 +67,18 @@ test.describe('Suite 9 — Local File Upload', () => {
   });
 
   test('9.2 Upload a valid DOCX file', async ({ page }) => {
-    await openUploadModal(page);
+    const modal = await openUploadModal(page);
     await uploadFiles(page, fixture('sample.docx'));
-    await expect(page.getByText(/sample\.docx/i)).toBeVisible({ timeout: 10_000 });
+    // Scope the chip check to the modal — the Data Library behind it accumulates
+    // sample.docx rows across runs, so an unscoped match is strict-mode ambiguous.
+    await expect(modal.getByText(/sample\.docx/i).first()).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /^Upload File$/i }).click();
   });
 
   test('9.3 Upload a valid image file (PNG)', async ({ page }) => {
-    await openUploadModal(page);
+    const modal = await openUploadModal(page);
     await uploadFiles(page, fixture('image.png'));
-    await expect(page.getByText(/image\.png/i)).toBeVisible({ timeout: 10_000 });
+    await expect(modal.getByText(/image\.png/i).first()).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /^Upload File$/i }).click();
   });
 

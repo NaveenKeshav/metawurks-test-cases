@@ -77,10 +77,24 @@ test.describe('Suite 22 — Session & Token management', () => {
   });
 
   test('22.8 Direct API call without session returns 401', async ({ browser }) => {
-    const clean = await browser.newContext(); // no storageState
+    const clean = await browser.newContext(); // no storageState / no session cookie
     const res = await clean.request.get(`${config.appUrl}/api/chat/history?page=1&limit=1`, { failOnStatusCode: false });
-    expect([401, 403]).toContain(res.status());
+    const status = res.status();
+    let chatCount = -1;
+    try { const body = await res.json(); if (Array.isArray(body?.chats)) chatCount = body.chats.length; } catch { /* not JSON */ }
     await clean.close();
+    // PRODUCT BUG (High / Security): the protected BFF endpoints
+    // (/api/chat/history, /api/connections, /api/projects, /api/documents) all
+    // respond 200 with REAL user data to a request that carries NO session
+    // cookie — user chat history, connections, projects and documents are
+    // exposed to unauthenticated callers. They must reject with 401/403.
+    // This assertion is meant to FAIL until the BFF enforces authentication —
+    // do not weaken it to green.
+    expect(
+      [401, 403],
+      `PRODUCT BUG: unauthenticated GET /api/chat/history returned ${status}` +
+        (chatCount >= 0 ? ` with ${chatCount} chat(s) of real user data exposed` : '')
+    ).toContain(status);
   });
 
   test('22.9 Token stored in secure/httpOnly location (not JS-readable)', async ({ page, context }) => {

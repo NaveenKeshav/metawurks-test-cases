@@ -186,19 +186,41 @@ test.describe('Suite 12 — Projects', () => {
   });
 
   test('12.11 List all projects', async ({ page }) => {
+    // Backend list is the source of truth; the sidebar must reflect it.
+    const res = await page.request.get('/api/projects');
+    const projects = res.ok() ? await res.json() : [];
     await openProjects(page);
-    // Either project rows or the empty-state text is shown
-    await expect(
-      page.getByText('No projects yet').or(page.getByRole('button', { name: 'Projects' }))
-    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Projects' }).first()).toBeVisible();
+    if (Array.isArray(projects) && projects.length > 0) {
+      // Projects exist → the list renders real rows, not the empty state.
+      await expect(page.getByText('No projects yet')).toHaveCount(0);
+      // At least one of the backend's recent projects is rendered in the sidebar
+      // (checking several recent names makes this robust to ordering/scroll).
+      const names: string[] = projects.slice(0, 15).map((p: any) => p.name).filter(Boolean);
+      let anyVisible = false;
+      for (const n of names) {
+        if (await page.getByRole('button', { name: n }).first().isVisible().catch(() => false)) { anyVisible = true; break; }
+      }
+      expect(anyVisible, 'at least one backend project should be listed in the sidebar').toBeTruthy();
+    } else {
+      await expect(page.getByText('No projects yet').first()).toBeVisible();
+    }
   });
 
   test('12.12 Project access permission enforcement', async ({ page }) => {
     // Opening a project id not owned by the user must not expose its context.
-    await page.goto('/chat?project_id=nonexistent-not-owned-123');
-    await page.waitForTimeout(1500);
-    // App stays functional / does not crash into someone else's project
-    await expect(page.getByRole('button', { name: 'Conversations' })).toBeVisible({ timeout: 15_000 });
+    await page.goto('/chat?project_id=nonexistent-not-owned-123', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+    // Enforcement holds: the app does NOT crash and does NOT leak the non-owned
+    // project's data or a server error/stack. The top-level sidebar nav stays
+    // usable. (Note: unlike a valid owned project, the project-scoped
+    // "Conversations" section is not rendered for an unknown id — the non-owned
+    // context is simply not shown, which is the correct security outcome; we
+    // therefore assert on the always-present nav, not that scoped section.)
+    await expect(page.getByRole('button', { name: 'Projects' }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Agents' }).first()).toBeVisible();
+    // No unauthorized data / raw error leaked into the page.
+    await expect(page.getByText(/stack trace|ECONNREFUSED|Traceback|Internal Server Error/i)).toHaveCount(0);
   });
 
   test('12.13 Creating a project while offline shows a clear error', async ({ page, context }) => {
