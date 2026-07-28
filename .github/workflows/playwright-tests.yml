@@ -38,7 +38,10 @@ jobs:
         run: npx playwright install ${{ matrix.browser }}
 
       - name: Run Playwright tests on ${{ matrix.browser }}
-        run: npx playwright test --project=${{ matrix.browser }} --reporter=line,html
+        # Run all projects (setup + chromium + chromium-no-auth) so the signed-out
+        # suites (01, 02, 03, 05, 20, 21) in chromium-no-auth are included. A
+        # single --project=chromium filter excludes them entirely.
+        run: npx playwright test --reporter=line,html
         env:
           CI: true
           BASE_URL: ${{ secrets.BASE_URL || 'https://metawurks.com/' }}
