@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { openDashboard } from '../shared/auth-helper';
 import { composer, openUploadModal } from '../shared/app-helpers';
 
@@ -52,7 +53,25 @@ test.describe('Suite 25 — Accessibility & i18n', () => {
   });
 
   test('25.5 Color contrast meets WCAG AA', async ({ page }) => {
-    test.skip(true, 'Requires an axe-core/contrast auditor not bundled in this suite');
+    // Real axe-core audit (@axe-core/playwright is now a devDependency). Scoped to
+    // the WCAG 2 AA colour-contrast rule only, which is exactly what PDF 25.5 asks
+    // for — a full a11y sweep belongs to the other 25.x cases.
+    await openDashboard(page);
+    const results = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze();
+
+    const violations = results.violations.flatMap((v) =>
+      v.nodes.map((n) => ({
+        impact: n.impact ?? v.impact ?? 'unknown',
+        target: String(n.target?.[0] ?? ''),
+        summary: (n.failureSummary ?? '').replace(/\s+/g, ' ').slice(0, 160),
+      }))
+    );
+
+    expect(
+      violations,
+      `WCAG AA colour-contrast violations (${violations.length}):\n` +
+        violations.map((v) => `  [${v.impact}] ${v.target} — ${v.summary}`).join('\n')
+    ).toHaveLength(0);
   });
 
   test('25.6 Focus trapped within modal until dismissed', async ({ page }) => {

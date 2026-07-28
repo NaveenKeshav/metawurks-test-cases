@@ -183,8 +183,12 @@ test.describe('Suite 24 — Chat data integrity & history', () => {
   test('24.11 Renaming chat title persists and updates sidebar', async ({ page }) => {
     test.setTimeout(120_000);
     await sendMessage(page, 'Rename-persist seed ' + Date.now());
-    await page.waitForTimeout(2500);
-    const chatId = page.url().split('/chat/')[1];
+    // Wait for the real chat URL instead of a fixed sleep. A flat 2.5s wait raced
+    // dev2 under load: the URL was still /chat, so `split('/chat/')[1]` produced
+    // undefined and the later history lookup returned undefined — a false failure
+    // that looked like "rename did not persist".
+    await page.waitForURL(/\/chat\/[0-9a-f-]{36}/i, { timeout: 60_000 });
+    const chatId = page.url().match(/\/chat\/([0-9a-f-]{36})/i)![1];
     await openActiveChatRowMenu(page);
     await page.getByText('Rename', { exact: true }).filter({ visible: true }).first().click();
     // The renaming row shows an inline input (React autoFocus → no `autofocus`
@@ -213,13 +217,19 @@ test.describe('Suite 24 — Chat data integrity & history', () => {
     test.setTimeout(120_000);
     const seed = 'Delete-and-url seed ' + Date.now(); // unique (timestamped)
     await sendMessage(page, seed);
-    await page.waitForTimeout(2500);
+    // Wait for the real chat URL rather than a fixed sleep (see 24.11 — the flat
+    // wait raced dev2 and captured '/chat' instead of the chat's own URL).
+    await page.waitForURL(/\/chat\/[0-9a-f-]{36}/i, { timeout: 60_000 });
     const chatUrl = page.url();
     await openActiveChatRowMenu(page);
     await page.getByText('Delete', { exact: true }).filter({ visible: true }).first().click();
     await expect(page.getByText('Delete chat?')).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: 'Delete', exact: true }).filter({ visible: true }).last().click();
-    await expect(page.getByRole('heading', { name: /Let's orchestrate/i }).first()).toBeVisible({ timeout: 20_000 });
+    // Deleting the ACTIVE chat must return the user to the welcome view. Assert the
+    // navigation first (the reliable signal, as used by 7.20), then the heading —
+    // waiting only on the heading conflated "did not navigate" with "rendered slowly".
+    await page.waitForURL(/\/chat(\?|$)/, { timeout: 20_000 });
+    await expect(page.getByRole('heading', { name: /Let's orchestrate/i }).first()).toBeVisible({ timeout: 30_000 });
     // Direct URL no longer restores the deleted chat's message. Match the UNIQUE
     // seed (timestamped) inside the THREAD — the sidebar can contain other runs'
     // "Delete-and-url seed …" rows, and a substring match would falsely count them.

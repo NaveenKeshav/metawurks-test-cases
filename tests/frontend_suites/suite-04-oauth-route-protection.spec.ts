@@ -40,14 +40,20 @@ test.describe('Suite 4 — OAuth & Route Protection (logged out)', () => {
     await expectGoogleFlowInitiated(page);
   });
 
-  test('4.2 Google OAuth cancel returns to app without a session', async ({ page, context }) => {
-    await page.goto(loginUrl);
-    await expectGoogleFlowInitiated(page);
-    // Full consent is external; simulate abandoning it by returning to /login.
-    await page.goto(loginUrl);
-    await expect(page.getByText('Sign in to MetaWurks')).toBeVisible();
-    const cookies = await context.cookies();
-    expect(cookies.some((c) => /next-auth\.session-token/.test(c.name))).toBeFalsy();
+  test('4.2 Google OAuth cancel returns to app without a session', async () => {
+    test.skip(
+      true,
+      "NOT AUTOMATABLE — the cancel/deny path needs Google's own consent screen, which is a " +
+        'third-party page Playwright cannot drive. It is also FIRST-TIME-ONLY: Google renders the ' +
+        'consent screen only on an account\'s first authorization of the app, so once a test account ' +
+        'has granted consent there is no screen left to cancel — the flow signs straight in. ' +
+        "Previously this case navigated back to /login and asserted 'no session cookie', which passes " +
+        'vacuously (no sign-in was ever attempted) and claimed cancel/deny coverage it never had. ' +
+        "Additionally the PDF's expected OUT ('sign-in cancelled' message) has no implementation: " +
+        'components/login/LoginForm.tsx sets its error state only from the credentials signIn() result ' +
+        "and never reads NextAuth's ?error=AccessDenied search param, so a real denial would return to " +
+        '/login silently. Verify manually with a Google account that has not yet authorized the app.'
+    );
   });
 
   test('4.3 Google OAuth first-time signup initiates provider consent', async ({ page }) => {

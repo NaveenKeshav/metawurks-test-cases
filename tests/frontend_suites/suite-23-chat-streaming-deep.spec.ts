@@ -219,8 +219,15 @@ test.describe('Suite 23 — Chat streaming deep', () => {
     // A user-facing error affordance must appear — a visible error/notice in the thread
     // or a toast, OR a Retry control. Search the thread + any toast/alert (not the whole
     // page, to avoid incidental matches).
+    // Include role="status": react-hot-toast (mounted app-wide in
+    // components/providers.tsx) renders its toasts as role="status" with
+    // goober-generated class names like `go3958317564` — so neither [role="alert"]
+    // nor [class*="toast"] would match one. Broadened so this can never report a
+    // false bug if a toast is added later. (Today ChatInterface.tsx makes no
+    // toast.* calls at all, and the StreamManager's only user-facing error
+    // side-effect is `token_limit_error` — the 402 dialog — so a 500 emits nothing.)
     const errText = await page
-      .locator('div.overflow-y-auto.pt-\\[56px\\], [role="alert"], [class*="toast"]')
+      .locator('div.overflow-y-auto.pt-\\[56px\\], [role="alert"], [role="status"], [class*="toast"]')
       .getByText(/error|failed|went wrong|unable|couldn'?t|try again|please try/i)
       .filter({ visible: true })
       .count();
@@ -291,11 +298,19 @@ test.describe('Suite 23 — Chat streaming deep', () => {
     await expect(cites.first()).toBeVisible();
   });
 
-  test('23.15 Inline task card renders and updates status during agent action', async ({ page }) => {
-    await sendMessage(page, 'Run a multi-step task if available.');
-    const card = page.getByText(/task|step/i).first();
-    test.skip(!(await card.count()), 'No inline task card triggered this run');
-    await expect(card).toBeVisible();
+  test('23.15 Inline task card renders and updates status during agent action', async () => {
+    test.skip(
+      true,
+      'AGENT/SKILL ACTIONS ARE NOT ACCESSIBLE ON THIS ACCOUNT, so the inline task card has no ' +
+        'trigger to render. Verified live against dev2 master-service: GET /skills?user_id=… returns ' +
+        '403 "Skills is not enabled for this user." — the per-user skills feature flag is off for the ' +
+        'test account, and master/app/routes/skills.py gates both start and resume behind it. The card ' +
+        'itself is real (components/chat/inline-task-status-card.tsx, driven by the `task_spawned` SSE ' +
+        'event), but that event is only emitted when the Team router spawns a background task, which ' +
+        'this account cannot reach. The previous conditional guard matched any text containing ' +
+        '"task"/"step" and so could pass on unrelated prose without a card ever rendering. Re-enable ' +
+        'once the account is entitled to skills/agent runs.'
+    );
   });
 
   test('23.16 Regenerate after Stop produces a fresh response', async ({ page }) => {
@@ -311,8 +326,16 @@ test.describe('Suite 23 — Chat streaming deep', () => {
     expect(await stopStream(page), 'stream should halt on Stop').toBeTruthy();
     // The stopped assistant message exposes Regenerate → click it → a fresh
     // generation runs and completes (Regenerate available again).
+    //
+    // TIMING NOTE: the action row is gated on `isAssistant && !isStreamingThisMessage`
+    // (MessageItem.tsx) and Regenerate is additionally disabled while
+    // `status !== 'ready'` (message-actions.tsx). After a Stop the message takes a
+    // few seconds to settle out of the streaming state, so Regenerate is genuinely
+    // absent at first and then appears — measured absent at 4s, present well within
+    // the 30s allowance. Keep a generous timeout here; do NOT shorten it, and do not
+    // read an early absence as a missing feature.
     const regen = regenerateButton(page).first();
-    await expect(regen).toBeVisible({ timeout: 30_000 });
+    await expect(regen, 'a stopped message must offer Regenerate once it settles').toBeVisible({ timeout: 30_000 });
     await regen.click();
     await expect(regenerateButton(page).first()).toBeVisible({ timeout: 90_000 });
   });

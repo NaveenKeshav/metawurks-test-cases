@@ -77,24 +77,33 @@ test.describe('Suite 22 — Session & Token management', () => {
   });
 
   test('22.8 Direct API call without session returns 401', async ({ browser }) => {
-    const clean = await browser.newContext(); // no storageState / no session cookie
-    const res = await clean.request.get(`${config.appUrl}/api/chat/history?page=1&limit=1`, { failOnStatusCode: false });
-    const status = res.status();
-    let chatCount = -1;
-    try { const body = await res.json(); if (Array.isArray(body?.chats)) chatCount = body.chats.length; } catch { /* not JSON */ }
-    await clean.close();
-    // PRODUCT BUG (High / Security): the protected BFF endpoints
-    // (/api/chat/history, /api/connections, /api/projects, /api/documents) all
-    // respond 200 with REAL user data to a request that carries NO session
-    // cookie — user chat history, connections, projects and documents are
-    // exposed to unauthenticated callers. They must reject with 401/403.
-    // This assertion is meant to FAIL until the BFF enforces authentication —
-    // do not weaken it to green.
+    // TRAP — read before editing: `browser.newContext()` INHERITS the project's
+    // `use.storageState` (.auth/user.json), so a context created that way is fully
+    // logged in. An earlier revision used it, labelled it "no session cookie", got
+    // 200, and reported a High/Security PRODUCT BUG claiming the BFF exposed real
+    // user data to anonymous callers. That was an instrument fault: the request
+    // carried __Secure-next-auth.session-token, so 200 was correct and the "exposed"
+    // rows were the test account's own chats. Verified three ways that the app is
+    // correct — curl with no cookies, an explicit-empty context, and the source
+    // (app/api/chat/history/route.ts calls getServerSession and returns 401).
+    // An explicitly EMPTY storageState is the only genuinely anonymous context.
+    const anon = await browser.newContext({ storageState: { cookies: [], origins: [] } });
     expect(
-      [401, 403],
-      `PRODUCT BUG: unauthenticated GET /api/chat/history returned ${status}` +
-        (chatCount >= 0 ? ` with ${chatCount} chat(s) of real user data exposed` : '')
-    ).toContain(status);
+      (await anon.cookies()).some((c) => /next-auth\.session-token/.test(c.name)),
+      'guard: the context must carry no session cookie, or this test proves nothing'
+    ).toBe(false);
+
+    // Cover every protected BFF endpoint the old comment named.
+    const endpoints = ['/api/chat/history?page=1&limit=1', '/api/connections', '/api/projects', '/api/documents'];
+    const results: Record<string, number> = {};
+    for (const ep of endpoints) {
+      results[ep] = (await anon.request.get(`${config.appUrl}${ep}`, { failOnStatusCode: false })).status();
+    }
+    await anon.close();
+
+    for (const ep of endpoints) {
+      expect([401, 403], `unauthenticated GET ${ep} returned ${results[ep]} — must reject`).toContain(results[ep]);
+    }
   });
 
   test('22.9 Token stored in secure/httpOnly location (not JS-readable)', async ({ page, context }) => {
@@ -109,7 +118,16 @@ test.describe('Suite 22 — Session & Token management', () => {
   });
 
   test('22.10 Refresh token rotation invalidates old refresh token', async ({ page }) => {
-    test.skip(true, 'Refresh-token rotation is a backend guarantee with no client-observable signal');
+    test.skip(
+      true,
+      'NO REFRESH TOKENS EXIST — corrected reason. The earlier note ("a backend guarantee with no ' +
+        'client-observable signal") implied rotation happens invisibly; it does not happen at all. ' +
+        'lib/auth.ts configures NextAuth with session.strategy = "jwt" and no refresh-token flow: the ' +
+        'session is a single stateless signed JWT cookie (next-auth.session-token) with no server-side ' +
+        'session store and no paired refresh token to rotate. So there is no old token that could be ' +
+        'invalidated, and the PDF case has no mechanism to exercise. TO ENABLE: the app would have to ' +
+        'adopt a database session strategy or an explicit refresh-token flow.'
+    );
   });
 
   test('22.11 Clock skew tolerance on token validation', async ({ page }) => {
