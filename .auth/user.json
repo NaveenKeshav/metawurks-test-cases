@@ -2,7 +2,7 @@
   "cookies": [
     {
       "name": "__Host-next-auth.csrf-token",
-      "value": "0389eb9cb0423764273a0fee963a87b128ca7bab6d08e8bf6ed71d03bcd5192c%7Cfb556bfa7f05fc4c39b77a7afd263f6f86599821f105bd5657ed19a83857d511",
+      "value": "a22014aa7df7580f233ec159cb57ce3697669de3fe53b6594ba4ef9ca3ea84ad%7Cf9f76614fecec8c9262578eb3a96c4932cd5e5d343b3b35d7e9995871acfb619",
       "domain": "dev2.metawurks.com",
       "path": "/",
       "expires": -1,
@@ -22,20 +22,20 @@
     },
     {
       "name": "WMF-Uniq",
-      "value": "cKbruvspNR48_VzTs94oYAOqAAAAAFvdC7E6vGZGMQVLO2lV0NN6m8d0sQ14jlWl",
+      "value": "nooGQM-0yWP-4W6qkE__QgOrAAAAAFvdU4RRBRMH6R-JUFTPVLL_c5fULlSzc4wk",
       "domain": ".upload.wikimedia.org",
       "path": "/",
-      "expires": 1816657326.164962,
+      "expires": 1816745087.66251,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "__Secure-next-auth.session-token",
-      "value": "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..4F8rSJHz47BLfrHz.txTVMNaHaYKqMKcRd8vOrdwcC37P3wRx4JBfmjwliYOXQFyJfnVkfx3cSiTGhNpwmKOMtkRLsfo6AvahDTY-BFiIND22yX_diOOdMwv3JsYtg_RmmMGIUt-MOqRjlOb34HMoTJzCQYmS0BG2_4GlxLvq5SNZOWvxvk1rjNWQMTAcoolGkr_h-6FFxecsQ-AswfJrPg4aYgUBNPNWfqw3JnPnB63cP3Cabn6rXgzwHGJxuFrawwAXLQ1iQD6OptsPBRX0ZzN9XZo-kYPNowLuw_TU8iOP6RM3bGCERNcFoOXTR-ZABGtqYPXnKmi9Aqk.c27kBapJkhQowjvbnPVWhw",
+      "value": "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..BBtLgqxz_Ah2ErOX.GBe9k_K0CJtYsbQTERuWKB2L3vSwv3BOjkJBEuXjOteKWbYVtwjXV6Enizm_togCGxT8rkONDjixaLQgzZg84hVNqRpzeTPefONY2zpvHyNfehE7bDHcK219l0RGO8Xvabr8f0GEbxca2OfBAmuoyjkA_xrxxfNXTEMEhBiujapVbfrH_E720X3eRw8o7gCh8oZhbv0U9SwnjTmQ48Ak1CnaxAxFsbUjzpOn0gto0sF0PeEDbkujKKkeDlhyP6ZtpppOTpPHWkR8AsoNz5QHfRIolN21a7dVv9k5QzBf8khTTs-HWd7U_1UXE8uz84A.7lpthWSiaF867HegoLeoug",
       "domain": "dev2.metawurks.com",
       "path": "/",
-      "expires": 1787754987,
+      "expires": 1787828824,
       "httpOnly": true,
       "secure": true,
       "sameSite": "Lax"
@@ -47,7 +47,7 @@
       "localStorage": [
         {
           "name": "nextauth.message",
-          "value": "{\"event\":\"session\",\"data\":{\"trigger\":\"getSession\"},\"timestamp\":1785162978}"
+          "value": "{\"event\":\"session\",\"data\":{\"trigger\":\"getSession\"},\"timestamp\":1785236817}"
         }
       ]
     }
