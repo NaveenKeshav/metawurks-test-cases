@@ -83,16 +83,32 @@ test.describe('Suite 34 — Settings deep', () => {
     await expect(page.getByText('1,000,000').first()).toBeVisible();
   });
 
-  test('34.7 Generate API key', async ({ page }) => {
-    test.skip(true, 'No API Keys tab/feature exists in settings — Known Gaps Report');
+  test('34.7 Generate API key', async () => {
+    test.skip(
+      true,
+      'DIFFERENT FEATURE (matches this suite\'s header) — Settings → Models DOES ship an "API Keys" ' +
+        'section (ApiKeysSection.tsx → /api/user/api-keys), so the "no API Keys feature" wording was ' +
+        'wrong. It is bring-your-own-key: the user pastes an existing provider key. The app never mints ' +
+        'one, so there is no "generate → shown once, listed masked afterward" flow to exercise.'
+    );
   });
 
-  test('34.8 Verify API key works', async ({ page }) => {
-    test.skip(true, 'No API Keys feature exists — Known Gaps Report');
+  test('34.8 Verify API key works', async () => {
+    test.skip(
+      true,
+      'DIFFERENT FEATURE — "Save & Verify" is real (PUT /api/user/api-keys, verified backend-side; a bad ' +
+        'key returns non-ok and is not stored), but it validates a user-supplied PROVIDER key, not a ' +
+        'MetaWurks-issued key making an authorised request. The PDF case depends on 34.7\'s generated key.'
+    );
   });
 
-  test('34.9 Revoke API key', async ({ page }) => {
-    test.skip(true, 'No API Keys feature exists — Known Gaps Report');
+  test('34.9 Revoke API key', async () => {
+    test.skip(
+      true,
+      'DIFFERENT FEATURE — "Remove" (DELETE /api/user/api-keys) deletes the user\'s stored PROVIDER key ' +
+        'so the shared MetaWurks key is used again; no issued key is invalidated and no subsequent ' +
+        'request starts failing. Driving Remove also requires a real provider key to be stored first.'
+    );
   });
 
   test('34.10 Environment/database switch', async ({ page }) => {
@@ -180,12 +196,21 @@ test.describe('Suite 34 — Settings deep', () => {
   });
 
   test('34.13 API key list shows creation date and last-used timestamp', async ({ page }) => {
-    // Verified LIVE on dev2: the created-at / last-used API-key metadata does NOT
-    // exist. There is no MetaWurks API-key generator or key list (34.7–34.9 absent).
-    // The only API-keys UI is the BYOK provider-key section (Models tab), and its data
-    // source GET /api/user/api-keys returns 404 on dev2; even its shape is only
-    // {provider,label,enabled,hasKey,masked} — no createdAt / lastUsed field, and no
-    // timestamp is rendered anywhere. There is nothing to assert.
-    test.skip(true, 'No API-key created-at/last-used metadata exists on dev2 (no key generator/list; BYOK data has no timestamps and /api/user/api-keys 404s) — Known Gaps Report');
+    // CORRECTION: an earlier reason claimed "/api/user/api-keys 404s on dev2". That is
+    // WRONG — re-verified live: an unauthenticated GET returns 401 (route deployed,
+    // auth required) and /api/user/api-keys/verify returns 405 for GET. The route
+    // exists and the Models-tab BYOK section uses it successfully.
+    // The case is still unassertable for the reason that actually holds: there is no
+    // MetaWurks API-key generator or key LIST (34.7–34.9), and the BYOK payload shape
+    // is {provider,label,enabled,hasKey,masked} — no createdAt / lastUsed field is
+    // stored or rendered anywhere, so there is no timestamp to assert.
+    test.skip(
+      true,
+      'No API-key created-at/last-used metadata exists: no MetaWurks key generator/list, and the BYOK ' +
+        'provider-key payload carries no timestamps (shape is {provider,label,enabled,hasKey,masked}). ' +
+        'NOTE: the earlier "/api/user/api-keys 404s" claim was false — the route is deployed on dev2 ' +
+        '(401 unauthenticated). TO ENABLE: the feature would need per-key createdAt/lastUsed persisted ' +
+        'and surfaced in ApiKeysSection.tsx.'
+    );
   });
 });

@@ -285,13 +285,38 @@ test.describe('Suite 7 — Chat Management', () => {
     await expect(page.locator('.break-all').first()).toContainText('/chat/shared/', { timeout: 15_000 });
     const shareUrl = (await page.locator('.break-all').first().innerText()).trim();
 
-    const ctx = await browser.newContext(); // clean, signed-out
+    // `browser.newContext()` INHERITS this project's use.storageState
+    // (.auth/user.json), so a context made that way is the logged-in OWNER, not a
+    // recipient. An earlier revision used it and labelled it "clean, signed-out",
+    // which made this test pass without ever exercising an anonymous viewer.
+    // Only an explicitly EMPTY storageState is genuinely signed out.
+    const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    expect(
+      (await ctx.cookies()).some((c) => /next-auth\.session-token/.test(c.name)),
+      'guard: the viewer must be signed out, or this test proves nothing'
+    ).toBe(false);
+
     const viewer = await ctx.newPage();
     await viewer.goto(shareUrl);
-    // Conversation shown read-only: the "Shared Chat" view renders (not a login
-    // redirect / not-found) and there is NO composer/send input for the viewer.
-    await expect(viewer.getByText('Shared Chat').first()).toBeVisible({ timeout: 20_000 });
-    await expect(viewer.locator('textarea')).toHaveCount(0);
+
+    // PRODUCT BUG (High): a share link is unusable by the person it was shared
+    // with. proxy.ts's matcher is `/chat/:path*`, which also captures
+    // `/chat/shared/:token`, so an anonymous recipient is redirected to
+    // /login?callbackUrl=/chat/shared/<token> and never sees the conversation.
+    // Verified anonymously against dev2: 307 → /login. The BFF route
+    // /api/chat/shared/[shareToken] is correctly PUBLIC (no getServerSession), so
+    // only the page guard is wrong — excluding /chat/shared from the matcher fixes
+    // it. These assertions target the CORRECT behaviour and are meant to FAIL
+    // until then; do NOT restore the authenticated context to make them green.
+    const url = viewer.url();
+    expect(url, `PRODUCT BUG: anonymous recipient of a share link is redirected to login (${url})`).not.toMatch(
+      /\/login/
+    );
+    await expect(
+      viewer.getByText('Shared Chat').first(),
+      'PRODUCT BUG: shared conversation is not viewable by a signed-out recipient'
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(viewer.locator('textarea'), 'shared view must be read-only').toHaveCount(0);
     await ctx.close();
   });
 

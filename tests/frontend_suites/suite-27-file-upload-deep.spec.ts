@@ -225,7 +225,52 @@ test.describe('Suite 27 — File upload deep', () => {
   });
 
   test('27.15 Upload a password-protected PDF', async ({ page }) => {
-    test.skip(true, 'No encrypted-PDF fixture available and the cannot-read outcome is a server-side (rag-worker) result — not verifiable from the frontend without seeding');
+    // Real encrypted fixture (tests/fixtures/encrypted.pdf — AES, user password
+    // "metawurks-e2e"; pypdf raises FileNotDecryptedError when read without it),
+    // so rag-worker's reader cannot extract text from it.
+    // PDF 27.15: "processing fails gracefully with cannot-read message" — i.e. the
+    // upload is ACCEPTED (a .pdf passes client validation), then processing ends in
+    // a FAILED state carrying a reason. Both halves are asserted.
+    test.setTimeout(240_000);
+    const { file, name } = uniqueCopy('encrypted.pdf', 'protected');
+    await expectAccepted(await uploadForReal(page, file));
+
+    // Poll the real notifications feed for this file's terminal state. The decrypt
+    // failure happens at the READ step — before chunking/enrichment/embedding — so
+    // it should surface far faster than a successful pipeline (>4min in 27.x).
+    const statusOf = async (): Promise<{ status?: string; error?: string } | null> => {
+      const res = await page.request.get('/api/notifications/recent', { failOnStatusCode: false });
+      if (!res.ok()) return null;
+      const items = (await res.json().catch(() => ({})))?.notifications ?? [];
+      const hit = items.find((n: any) => String(n.filename ?? '').includes(name.replace(/\.pdf$/, '')));
+      return hit ? { status: hit.status, error: hit.errorMessage } : null;
+    };
+
+    let last: { status?: string; error?: string } | null = null;
+    await expect
+      .poll(
+        async () => {
+          last = await statusOf();
+          return last?.status ?? 'pending';
+        },
+        {
+          timeout: 180_000,
+          intervals: [5_000],
+          message:
+            'the encrypted PDF must reach a terminal processing state (graceful failure), not stay in processing forever',
+        }
+      )
+      .toMatch(/failed|completed/i);
+
+    // The graceful part: it must FAIL (not silently "complete" with no text) and
+    // carry a reason the user can read.
+    expect(last!.status, `PDF 27.15 expects processing to FAIL for an unreadable PDF, got "${last!.status}"`).toMatch(
+      /failed/i
+    );
+    expect(
+      String(last!.error ?? ''),
+      'the failure must carry a cannot-read reason for the user'
+    ).not.toHaveLength(0);
   });
 
   test('27.16 Upload file with unicode/emoji and a very long filename', async ({ page }) => {
@@ -285,7 +330,16 @@ test.describe('Suite 27 — File upload deep', () => {
   });
 
   test('27.21 Retry a failed upload', async ({ page }) => {
-    test.skip(true, 'A deterministic failure-then-retry needs fault injection (a real transient outage); we do not mock — the happy-path upload is covered by 27.1');
+    test.skip(
+      true,
+      'NO RETRY CONTROL EXISTS — corrected reason. The earlier note said this "needs fault injection; we ' +
+        'do not mock", which is both the wrong blocker and inconsistent with the repo (Suite 26 injects ' +
+        'faults with route.fulfill for 26.1/26.2/26.3). Injecting an upload failure is easy; the problem ' +
+        'is there is nothing to click afterwards. A failed document exposes no retry/reprocess affordance ' +
+        'anywhere in the notification panel or the knowledge components (same gap as 29.3), and the ' +
+        'failure does not even carry a reason (rag-worker never persists error_message — see 27.15). ' +
+        'TO ENABLE: add a retry action on a failed document, then this becomes injectable in one step.'
+    );
   });
 
   test('27.22 Concurrent uploads from two tabs', async ({ page, context }) => {

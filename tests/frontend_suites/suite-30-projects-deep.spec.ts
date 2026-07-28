@@ -182,8 +182,14 @@ test.describe('Suite 30 — Projects deep', () => {
     const history = (await (
       await page.request.get('/api/chat/history?limit=30')
     ).json()) as ChatHistoryResponse;
-    test.skip(!history.chats.length, 'Account has no chats to move');
-    const chat = history.chats[0];
+    // Pick a chat whose title is UNAMBIGUOUS. Many chats are still titled "New Chat"
+    // (the 7.6 auto-title defect leaves them that way), and the project workspace has
+    // its own "New Chat" action button — so getByRole('button', {name: chat.title})
+    // would match that button instead of the conversation row, hover the wrong
+    // element, and fail as "row kebab not found".
+    const usable = history.chats.filter((c) => c.title && !/^\s*new chat\s*$/i.test(c.title));
+    test.skip(!usable.length, 'Account has no distinctly-titled chat to move (all are "New Chat")');
+    const chat = usable[0];
     const originalProjectId = chat.project_id;
  
     // SETUP (not the assertion): park the chat in project A via the API, so the UI
@@ -213,11 +219,30 @@ test.describe('Suite 30 — Projects deep', () => {
     const titleBtn = page.getByRole('button', { name: chat.title }).first();
     await expect(titleBtn).toBeVisible({ timeout: 20_000 });
     const rowA = titleBtn.locator('xpath=..');
-    await rowA.hover();
-    // The 3-dot button only renders while the row is hovered — wait for it.
-    const kebab = rowA.getByRole('button').last();
-    await expect(kebab).toBeVisible({ timeout: 5_000 });
+    // The kebab renders only while `hoveredId === chat.id`, set by React's
+    // onMouseEnter on the row wrapper (ProjectWelcomeScreen.tsx ~478). React
+    // SYNTHESISES enter/leave from mouseover/mouseout delegation, so
+    // dispatchEvent('mouseenter') does nothing here (native mouseenter does not
+    // bubble) — unlike the sidebar rows in suite-07. A genuine pointer move is
+    // required; hover() first, then an explicit mouse.move to the row centre as a
+    // fallback for when the row shifts under the cursor.
+    await rowA.scrollIntoViewIfNeeded().catch(() => {});
+    // Target the kebab by its OWN classes (w-6 h-6, ProjectWelcomeScreen.tsx ~511).
+    // getByRole('button').last() is ambiguous inside this row — it can resolve to the
+    // title button, whose onClick router.push()es to the chat and navigates away, so
+    // the menu never appears and the failure reads as "Move to project not found".
+    const kebab = rowA.locator('button.w-6.h-6').last();
+    await rowA.hover().catch(() => {});
+    if (!(await kebab.isVisible().catch(() => false))) {
+      const box = await rowA.boundingBox();
+      if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    }
+    await expect(kebab, 'row kebab appears on hover').toBeVisible({ timeout: 10_000 });
     await kebab.click();
+    // Guard: a mis-targeted click would navigate to the chat instead of opening the menu.
+    expect(page.url(), 'clicking the kebab must not navigate away from the project workspace').toContain(
+      `project_id=${idA}`
+    );
  
     // Menu items are divs, not buttons (ChatContextMenu.tsx) → match by text.
     const moveEntry = page.getByText('Move to project', { exact: true });

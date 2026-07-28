@@ -36,20 +36,39 @@ test.describe('Suite 20 — Login deep edge cases', () => {
   });
 
   test('20.2 Unicode/IDN email address accepted at login', async ({ page }) => {
+    // PDF expects the IDN address to be "processed without normalization error".
+    // ACTUAL (verified live): #email is type="email" and the form is not
+    // noValidate, so the browser's own HTML5 validation — whose email grammar is
+    // ASCII-only by spec — rejects `tëst@münchen.de` and blocks submission
+    // entirely. No auth request is ever made. There IS user feedback, but it is
+    // the native validation bubble ("A part followed by '@' should not contain the
+    // symbol 'ë'"), not an in-page message.
+    //
+    // PRODUCT GAP (PDF 20.14-adjacent, Medium): the requirement is NOT met — an
+    // IDN address cannot be used to log in at all. This assertion targets the PDF
+    // requirement and is meant to FAIL until IDN/Unicode emails are submittable
+    // (e.g. type="text" + server-side normalisation, or Punycode encoding on
+    // submit). Do NOT re-point it at the native block to make it green: an earlier
+    // revision did exactly that, and a separate earlier revision failed it for the
+    // WRONG reason ("no error feedback"), which is also false — the browser does
+    // show its own message.
+    const authPosts: string[] = [];
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && /\/api\/auth\//.test(r.url())) authPosts.push(r.url());
+    });
+
     await gotoWithRecaptchaMock(page, loginUrl);
     await page.getByLabel(emailField).fill('tëst@münchen.de');
     await page.getByLabel(pwField).fill('SomePassword123');
     await page.getByRole('button', signInBtn).click();
-    // PRODUCT BUG (PDF 20.2): submitting a Unicode/IDN email (tëst@münchen.de)
-    // with bad credentials shows NO "Invalid email or password" / "valid email"
-    // feedback — the login form gives no visible error for the IDN case, leaving
-    // the user with no indication the attempt failed. This assertion is meant to
-    // FAIL until the app surfaces an error for IDN/Unicode emails.
-    await expect(
-      page.getByText(invalidError).or(page.getByText(/valid email/i)),
-      'PRODUCT BUG: no error feedback shown when logging in with a Unicode/IDN email (PDF 20.2 expects a validation/invalid-credentials message)'
-    ).toBeVisible({ timeout: 30_000 });
-    expect(page.url()).toContain('/login');
+    await page.waitForTimeout(3000);
+
+    // PDF: "Login processed without normalization error" — the attempt must at
+    // least REACH the credentials endpoint (it may then fail on bad credentials).
+    expect(
+      authPosts,
+      'PRODUCT GAP: an IDN email is never submitted — #email is type="email" and HTML5\'s email grammar is ASCII-only, so the browser blocks the form and no credentials request is made. PDF 20.2 requires the login to be processed.'
+    ).not.toHaveLength(0);
   });
 
   test('20.3 Very long password (300 chars) handled gracefully', async ({ page }) => {
@@ -138,21 +157,58 @@ test.describe('Suite 20 — Login deep edge cases', () => {
     expect(page.url()).toContain('callbackUrl');
   });
 
-  test('20.10 CSRF token required on login POST', async ({ page }) => {
+  test('20.10 CSRF token required on login POST', async ({ page, context }) => {
+    // CSRF IS enforced. NextAuth signals rejection in the RESPONSE BODY, not the
+    // status: a credentials callback in json mode always answers 200 and returns
+    // the URL the browser should follow. A rejected attempt returns
+    // `/api/auth/signin?csrf=true` and mints no session; an accepted one returns
+    // the app URL and sets next-auth.session-token.
+    //
+    // An earlier revision asserted `status !== 200` and therefore failed with a
+    // "CSRF not enforced" PRODUCT BUG label — a false security finding caused by
+    // reading the wrong signal. Assert the real one.
     await page.goto(loginUrl);
-    // Craft a credentials callback POST without a valid CSRF token
-    const res = await page.request.post(`${config.appUrl}/api/auth/callback/credentials`, {
+    const callback = `${config.appUrl}/api/auth/callback/credentials`;
+    const rejected = /[?&]csrf=true/;
+
+    // (a) No CSRF token at all → rejected.
+    const noToken = await page.request.post(callback, {
       form: { email: 'x@example.com', password: 'y', json: 'true' },
       failOnStatusCode: false,
     });
-    // PRODUCT BUG (PDF 20.10, security): a credentials callback POST made WITHOUT
-    // a valid CSRF token is accepted with HTTP 200 instead of being rejected. The
-    // login endpoint does not enforce CSRF protection on the callback. This
-    // assertion is meant to FAIL until CSRF is enforced (reject with non-200).
+    expect(await noToken.text(), 'a token-less login POST must be CSRF-rejected').toMatch(rejected);
+
+    // (b) A forged CSRF token → rejected.
+    const badToken = await page.request.post(callback, {
+      form: { email: 'x@example.com', password: 'y', csrfToken: 'deadbeef', json: 'true' },
+      failOnStatusCode: false,
+    });
+    expect(await badToken.text(), 'a forged CSRF token must be rejected').toMatch(rejected);
+
+    // Neither attempt may mint a session.
     expect(
-      res.status(),
-      `PRODUCT BUG: login callback POST without a CSRF token returned ${res.status()} (CSRF not enforced on /api/auth/callback/credentials)`
-    ).not.toBe(200);
+      (await context.cookies()).some((c) => /next-auth\.session-token/.test(c.name)),
+      'no session may be created by a CSRF-rejected login'
+    ).toBe(false);
+
+    // (c) Control — a genuine token + real credentials IS accepted, proving the
+    // rejections above are CSRF enforcement and not a blanket failure.
+    test.skip(!config.login.isConfigured, 'Needs real credentials for the positive control');
+    const csrf = await (await page.request.get(`${config.appUrl}/api/auth/csrf`)).json();
+    const good = await page.request.post(callback, {
+      form: {
+        email: config.login.username,
+        password: config.login.password,
+        csrfToken: csrf.csrfToken,
+        json: 'true',
+      },
+      failOnStatusCode: false,
+    });
+    expect(await good.text(), 'a valid CSRF token + credentials must NOT be CSRF-rejected').not.toMatch(rejected);
+    expect(
+      (await context.cookies()).some((c) => /next-auth\.session-token/.test(c.name)),
+      'the valid flow must mint a session'
+    ).toBe(true);
   });
 
   test('20.11 XSS payload in email field is neutralized', async ({ page }) => {
@@ -193,7 +249,7 @@ test.describe('Suite 20 — Login deep edge cases', () => {
     expect(statuses.every((s) => s < 500)).toBeTruthy();
   });
 
-  test('20.14 Browser Back after login does not expose stale form resubmit', async ({ page }) => {
+  test('20.14 Browser Back after login does not expose stale form resubmit', async ({ page, context }) => {
     test.skip(!config.login.isConfigured, 'Needs real credentials');
     await gotoWithRecaptchaMock(page, loginUrl);
     await page.getByLabel(emailField).fill(config.login.username);
@@ -201,14 +257,25 @@ test.describe('Suite 20 — Login deep edge cases', () => {
     await page.getByRole('button', signInBtn).click();
     await page.waitForURL(/\/chat/, { timeout: 30_000 });
     await page.goBack();
-    await page.waitForTimeout(1000);
-    // PRODUCT BUG (PDF 20.14): pressing Back after a successful login returns the
-    // user to the cached /login form (a stale, resubmittable page) instead of
-    // keeping them on the authenticated app. This assertion is meant to FAIL
-    // until Back no longer strands an authenticated user on /login.
+    await page.waitForTimeout(1500);
+
+    // Context for triage (NOT a reason to weaken the assertion): the session DOES
+    // survive Back — the cookie is intact and /chat still loads without a
+    // re-login — so this is a UX/routing gap, not the security hole that 4.8 is
+    // (there the session is destroyed and protected content still renders from
+    // bfcache). Root cause: /login is not in proxy.ts's matcher and no client-side
+    // redirect sends an authenticated visitor away.
+    const sessionAlive = (await context.cookies()).some((c) => /next-auth\.session-token/.test(c.name));
+
+    // PDF: "Stays authenticated; no stale form resubmission." Landing on the
+    // cached login form does not satisfy that, so this FAILS until an
+    // authenticated visitor is redirected off /login. An earlier revision
+    // inverted this assertion to make it pass — do not do that again.
+    // NOTE: 4.10 records this same unguarded-/login behaviour as an accepted
+    // divergence. The two must be reconciled; this one follows the PDF.
     expect(
       page.url(),
-      'PRODUCT BUG: Back after login lands on the stale /login form (resubmittable) instead of staying authenticated (PDF 20.14)'
+      `PRODUCT GAP: Back after login returns to the cached /login form instead of staying on the authenticated app (session still alive=${sessionAlive}; /login is unguarded — same root cause as 4.10)`
     ).not.toContain('/login');
   });
 

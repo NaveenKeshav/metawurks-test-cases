@@ -1,5 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import { openDashboard } from '../shared/auth-helper';
+import { sendMessage } from '../shared/app-helpers';
 
 /**
  * Suite 12 — Projects  (PDF TC 12.1–12.13)
@@ -175,14 +176,72 @@ test.describe('Suite 12 — Projects', () => {
   });
 
   test('12.10 Move chat to another project', async ({ page }) => {
-    // Requires an existing chat row context menu with "Move to project".
-    const conv = page.locator('.bg-sidebar-hover, [href^="/chat/"]').first();
-    test.skip(!(await conv.count()), 'No existing chat to move');
-    await conv.hover();
-    const kebab = conv.getByRole('button').first();
-    test.skip(!(await kebab.count()), 'Chat row menu not locatable');
-    await kebab.click();
-    await expect(page.getByText('Move to project')).toBeVisible({ timeout: 10_000 });
+    // PDF: IN move to project B → OUT chat relocated to project B. So the chat must
+    // START in project A and END in project B — a drawer→B move would not exercise
+    // the case. Feature path: ChatContextMenu.tsx "Move to project" submenu →
+    // PUT /api/chat/{id}/project → master PATCH /chats/{id}/project.
+    test.setTimeout(180_000);
+    const stamp = Date.now();
+    const nameA = `MoveFrom ${stamp}`;
+    const nameB = `MoveTo ${stamp}`;
+
+    for (const name of [nameA, nameB]) {
+      await openCreateDialog(page);
+      await page.locator('#project-name').fill(name);
+      await page.getByRole('button', { name: 'Create Project' }).click();
+      await expect(page.getByRole('button', { name }).first()).toBeVisible({ timeout: 20_000 });
+    }
+
+    const projects = await (await page.request.get('/api/projects')).json();
+    const idOf = (n: string) => (projects as any[]).find((p) => p.name === n)?.project_id;
+    const [idA, idB] = [idOf(nameA), idOf(nameB)];
+    expect(idA, 'project A id').toBeTruthy();
+    expect(idB, 'project B id').toBeTruthy();
+
+    // Create the chat INSIDE project A: open A (row-click → ?project_id=A), then send.
+    await page.getByRole('button', { name: nameA }).first().click();
+    await page.waitForURL(new RegExp(`project_id=${idA}`), { timeout: 20_000 });
+    await sendMessage(page, `Sky colour ${stamp}?`);
+    await page.waitForURL(/\/chat\/[0-9a-f-]{36}/i, { timeout: 60_000 });
+    const chatId = page.url().match(/\/chat\/([0-9a-f-]{36})/i)?.[1];
+    expect(chatId, 'new chat id from the URL').toBeTruthy();
+
+    const chatsIn = async (pid: string): Promise<string[]> => {
+      const res = await page.request.get(`/api/chat/history?project_id=${encodeURIComponent(pid)}`);
+      return res.ok() ? ((await res.json())?.chats ?? []).map((c: any) => c.chat_id) : [];
+    };
+
+    // Precondition: it really is in A before the move.
+    await expect
+      .poll(() => chatsIn(idA), { timeout: 30_000, message: 'new chat should start in project A' })
+      .toContain(chatId);
+
+    // Move A → B via the row's context menu. Target the ACTIVE row — we are on the
+    // new chat, and its row cannot be found by message text: a new chat's sidebar
+    // row stays "New Chat" until a reload (the 7.6 auto-title bug). Rows are plain
+    // divs (no href) and overlap, so use suite-07's dispatch pattern, not real
+    // hover/click.
+    const row = page.locator('.bg-sidebar-hover.h-\\[32px\\]').first();
+    await row.scrollIntoViewIfNeeded().catch(() => {});
+    await expect(row, 'active sidebar row for the new chat').toBeVisible({ timeout: 20_000 });
+    await row.dispatchEvent('mouseover');
+    await row.dispatchEvent('mouseenter');
+    await row.getByRole('button').first().dispatchEvent('click');
+
+    const moveItem = page.getByText('Move to project', { exact: true }).filter({ visible: true }).first();
+    await expect(moveItem, 'Move to project menu item').toBeVisible({ timeout: 10_000 });
+    await moveItem.dispatchEvent('mouseenter');
+    await moveItem.dispatchEvent('click');
+    // Submenu entries render as buttons labelled with the project name.
+    await page.getByRole('button', { name: nameB, exact: true }).filter({ visible: true }).last().dispatchEvent('click');
+
+    // OUT: relocated — present in B, and no longer in A.
+    await expect
+      .poll(() => chatsIn(idB), { timeout: 30_000, message: 'chat should be relocated into project B' })
+      .toContain(chatId);
+    await expect
+      .poll(() => chatsIn(idA), { timeout: 20_000, message: 'chat should no longer be in project A' })
+      .not.toContain(chatId);
   });
 
   test('12.11 List all projects', async ({ page }) => {

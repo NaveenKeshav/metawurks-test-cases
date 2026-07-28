@@ -215,14 +215,20 @@ test.describe('Suite 9 — Local File Upload', () => {
     await page.getByRole('button', { name: /^Upload File$/i }).click();
   });
 
-  test('9.18 Status transitions processing → completed → failed', async ({ page }) => {
-    // The status surface EXISTS: NotificationBell.tsx + NotificationPanel.tsx group
-    // upload notifications into processing/completed/failed status tabs. But
-    // verifying the full transition sequence requires seeded uploads in ALL THREE
-    // states simultaneously (a Failed upload especially is rare and not
-    // reproducible on demand), and the panel is not reliably openable in the
-    // automated welcome/streaming flow. Needs seeded state — documented gap.
-    test.skip(true, 'Needs seeded uploads in processing+completed+failed states; notification panel transitions not reproducible in automation');
+  test('9.18 Status transitions processing → completed → failed', async () => {
+    test.skip(
+      true,
+      'BLOCKED BY PROCESSING LATENCY. Three earlier reasons for this skip were checked and are ' +
+        'WRONG: (1) it does not need all three states seeded simultaneously — the PDF asks for a ' +
+        'sequence over one file ("status polls processing -> completed") plus a separate parse-error ' +
+        'case; (2) a failed upload IS reproducible on demand — the 0-byte fixtures/empty.txt makes ' +
+        'rag-worker raise "No text extracted from file" and mark the document failed; (3) the ' +
+        'notification panel IS reliably openable — 19.1 does it in ~5s (the old flakiness was a ' +
+        'selector collision with BugReportButton, which shares the bell\'s exact class list). ' +
+        'The real blocker is dev2 processing time: the rag-worker pipeline (download → read → chunk → ' +
+        'Gemini enrichment → embed → store) was observed at >4min in Suite 27, and this case needs two ' +
+        'such waits. Same blocker as 29.2. Automatable only with a longer-running job or a seeded fixture.'
+    );
   });
 
   test('9.19 Reject a file whose extension mismatches its content', async ({ page }) => {

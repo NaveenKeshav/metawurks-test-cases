@@ -19,7 +19,50 @@ test.describe('Suite 19 — Notifications/Voice/Misc', () => {
   test.use({ permissions: ['microphone'] });
 
   test('19.1 View recent notifications', async ({ page }) => {
-    test.skip(true, 'NotificationPanel is built but not mounted; there is no bell trigger in the UI (Known Gaps Report)');
+    // The bell IS mounted now (NotificationBell in ChatInterface.tsx + Search /
+    // Data Library / Integrations / Skills headers). The trigger button carries no
+    // accessible name — it is an unlabelled svg — so scope it by its class combo
+    // inside the header; everything asserted after opening uses accessible hooks.
+    await openDashboard(page);
+    // Several headers mount a bell (chat / search / library / integrations / skills)
+    // and the off-screen ones stay in the DOM, so filter to the visible one.
+    // `:not([title])` excludes the adjacent BugReportButton, which shares the exact
+    // same class list and renders immediately before the bell — the bell is the only
+    // one of the pair with NO accessible name at all (a11y gap, see 25.x).
+    const bell = page
+      .locator('button.bg-muted.w-\\[32px\\].h-\\[32px\\].rounded-full:not([title])')
+      .filter({ has: page.locator('svg') })
+      .filter({ visible: true })
+      .first();
+    await expect(bell, 'notification bell trigger').toBeVisible({ timeout: 20_000 });
+
+    const recent = page.waitForResponse(
+      (r) => r.url().includes('/api/notifications/recent') && r.request().method() === 'GET',
+      { timeout: 20_000 }
+    );
+    await bell.click();
+
+    // Panel opened and actually fetched.
+    await expect(page.getByText('Notifications', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: 'Refresh notifications' })).toBeVisible();
+    expect((await recent).status(), 'GET /api/notifications/recent').toBe(200);
+
+    // The fetch must resolve into the view — never a perpetual spinner.
+    await expect(page.getByText('Loading...'), 'panel should stop loading').toHaveCount(0, { timeout: 20_000 });
+
+    // Tabs are rendered from the grouped payload, so their counts prove the
+    // response was parsed and bound.
+    await expect(page.getByRole('button', { name: /^(Processing|Completed|Failed) \(\d+\)$/ }).first()).toBeVisible();
+
+    // OUT: "recent items listed". Uploads on the test account are transient, so a
+    // populated list is not guaranteed — accept EITHER rendered account cards
+    // (name + "N file(s)") or the panel's own empty state for the active tab.
+    const emptyState = await page.getByText(/^No (processing|completed|failed) notifications$/).count();
+    const accountCards = await page.getByText(/^\d+ files?$/).count();
+    expect(
+      emptyState + accountCards,
+      'panel should show notification items or its empty state'
+    ).toBeGreaterThan(0);
   });
 
   test('19.2 Voice input transcription', async ({ page }) => {
@@ -73,8 +116,22 @@ test.describe('Suite 19 — Notifications/Voice/Misc', () => {
     expect(noOverflow).toBeTruthy();
   });
 
-  test('19.6 Error toast on failed action', async ({ page }) => {
-    test.skip(true, 'App has no toast system; errors surface via window.alert() (Known Gaps Report)');
+  test('19.6 Error toast on failed action', async () => {
+    test.skip(
+      true,
+      'NOT REPRESENTATIVE — kept skipped by decision. Note the app DOES now have a toast ' +
+        'system (contrary to the earlier "no toast system" note): components/providers.tsx ' +
+        'mounts <Toaster/> app-wide via AuthProvider, and a rejected upload renders a real ' +
+        'react-hot-toast error node (verified live on dev2: role="status" aria-live="polite", ' +
+        'error iconTheme #ef4444, no window.alert on that path). It is still skipped because a ' +
+        'generic "error toast on failed action" cannot be asserted honestly: (1) the PDF requires ' +
+        'the toast be DISMISSIBLE and there is no close control at all — verified 0 buttons / 0 ' +
+        'labelled controls inside the toast, only the 5s auto-timeout; (2) error surfacing is ' +
+        'inconsistent — pricing/settings/HelpSupportModal/discover/DocumentListView still use ' +
+        'window.alert(), and the principal failure paths (chat 500, network drop) surface NOTHING ' +
+        'at all (see 6.6/6.13/23.2/26.1–26.3). A green check here would imply a uniform, ' +
+        'dismissible error-toast system that does not exist.'
+    );
   });
 
   test('19.7 Loading spinners during async ops', async ({ page }) => {

@@ -7,6 +7,27 @@ export const config = {
   baseUrl: process.env.BASE_URL || 'https://metawurks.com',
   appUrl: process.env.APP_URL || 'https://apps.metawurks.com',
 
+  /**
+   * Backend service base URLs (Suite 36 — API-level cases the frontend cannot
+   * reach). Defaults are the dev2 deployments taken from the app's own
+   * config/dev2/.env; all are publicly reachable and were verified live.
+   * Override per-environment via .env.
+   */
+  services: {
+    payment:
+      process.env.PAYMENT_SERVICE_URL ||
+      'https://dev2-metawurks-payment-service-306667460443.us-central1.run.app',
+    metering:
+      process.env.METERING_SERVICE_URL ||
+      'https://dev2-metawurks-metering-service-306667460443.us-central1.run.app',
+    master:
+      process.env.MASTER_SERVICE_URL ||
+      'https://dev2-metawurks-master-service-v2-306667460443.us-central1.run.app',
+    action:
+      process.env.ACTION_SERVICE_URL ||
+      'https://dev2-metawurks-action-service-v2-306667460443.us-central1.run.app',
+  },
+
   navigationTimeout: parseInt(process.env.NAVIGATION_TIMEOUT || '30000', 10),
   elementTimeout: parseInt(process.env.ELEMENT_TIMEOUT || '10000', 10),
 

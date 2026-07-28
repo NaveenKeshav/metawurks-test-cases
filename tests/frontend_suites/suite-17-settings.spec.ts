@@ -128,16 +128,37 @@ test.describe('Suite 17 — Settings', () => {
     ).toBeVisible({ timeout: 15_000 });
   });
 
-  test('17.10 Generate an API key', async ({ page }) => {
-    test.skip(true, 'No API Keys tab/feature exists in settings — Known Gaps Report');
+  test('17.10 Generate an API key', async () => {
+    test.skip(
+      true,
+      'DIFFERENT FEATURE — an API Keys UI DOES exist (Settings → Models → "API Keys", ' +
+        'components/settings/ApiKeysSection.tsx backed by /api/user/api-keys), so the older ' +
+        '"no API Keys feature" note is wrong. But it is bring-your-own-key: the user PASTES an ' +
+        'existing provider key (OpenAI/Anthropic/…) to run models at their own cost. The app never ' +
+        'MINTS a key, so the PDF\'s "generate → new key created and shown once" has nothing to drive.'
+    );
   });
 
-  test('17.11 Verify a generated API key works', async ({ page }) => {
-    test.skip(true, 'No API Keys feature exists — Known Gaps Report');
+  test('17.11 Verify a generated API key works', async () => {
+    test.skip(
+      true,
+      'DIFFERENT FEATURE — a real "Save & Verify" button exists (PUT /api/user/api-keys, verified ' +
+        'backend-side; an invalid key returns non-ok and is NOT persisted). It verifies a user-supplied ' +
+        'PROVIDER key against that provider, not a MetaWurks-issued key authorising an API request. ' +
+        'The PDF case presupposes 17.10\'s generated key, which does not exist. The BYOK verify path is ' +
+        'itself testable (invalid key → "Verification failed") — tracked separately, not asserted here.'
+    );
   });
 
-  test('17.12 Revoke an API key', async ({ page }) => {
-    test.skip(true, 'No API Keys feature exists — Known Gaps Report');
+  test('17.12 Revoke an API key', async () => {
+    test.skip(
+      true,
+      'DIFFERENT FEATURE — a "Remove" control exists (DELETE /api/user/api-keys) but it deletes the ' +
+        'user\'s stored PROVIDER key, i.e. the app stops using their key and falls back to the shared ' +
+        'MetaWurks key. Nothing is invalidated for subsequent API requests, because no MetaWurks-issued ' +
+        'key exists to revoke. Exercising Remove also needs a key stored first, which needs a real ' +
+        'provider key (an invalid one is rejected and never persisted).'
+    );
   });
 
   test('17.13 Database/environment selection', async ({ page }) => {
