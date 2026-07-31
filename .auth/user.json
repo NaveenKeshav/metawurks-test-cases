@@ -2,8 +2,8 @@
   "cookies": [
     {
       "name": "__Host-next-auth.csrf-token",
-      "value": "a22014aa7df7580f233ec159cb57ce3697669de3fe53b6594ba4ef9ca3ea84ad%7Cf9f76614fecec8c9262578eb3a96c4932cd5e5d343b3b35d7e9995871acfb619",
-      "domain": "dev2.metawurks.com",
+      "value": "ebfe1628a12104f52443c12734d1507cc0518493a09bad2f89de62f07ad64421%7C8a9e3390b6aae20c79f8100e7fe9bfd04b261de6fd523b028df86ef2412386cb",
+      "domain": "stage-dev2-apps.metawurks.com",
       "path": "/",
       "expires": -1,
       "httpOnly": true,
@@ -12,8 +12,8 @@
     },
     {
       "name": "__Secure-next-auth.callback-url",
-      "value": "https%3A%2F%2Fdev2.metawurks.com%2Flogin",
-      "domain": "dev2.metawurks.com",
+      "value": "https%3A%2F%2Fstage-dev2-apps.metawurks.com%2Flogin",
+      "domain": "stage-dev2-apps.metawurks.com",
       "path": "/",
       "expires": -1,
       "httpOnly": true,
@@ -22,20 +22,20 @@
     },
     {
       "name": "WMF-Uniq",
-      "value": "nooGQM-0yWP-4W6qkE__QgOrAAAAAFvdU4RRBRMH6R-JUFTPVLL_c5fULlSzc4wk",
+      "value": "-5hqN08dk7G7raML51_J7gOuAAAAAFvd6zNZZ_mXRp3Nnn4K2Q3Xi5Gumhqk0ICh",
       "domain": ".upload.wikimedia.org",
       "path": "/",
-      "expires": 1816745087.66251,
+      "expires": 1817004507.188442,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "__Secure-next-auth.session-token",
-      "value": "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..BBtLgqxz_Ah2ErOX.GBe9k_K0CJtYsbQTERuWKB2L3vSwv3BOjkJBEuXjOteKWbYVtwjXV6Enizm_togCGxT8rkONDjixaLQgzZg84hVNqRpzeTPefONY2zpvHyNfehE7bDHcK219l0RGO8Xvabr8f0GEbxca2OfBAmuoyjkA_xrxxfNXTEMEhBiujapVbfrH_E720X3eRw8o7gCh8oZhbv0U9SwnjTmQ48Ak1CnaxAxFsbUjzpOn0gto0sF0PeEDbkujKKkeDlhyP6ZtpppOTpPHWkR8AsoNz5QHfRIolN21a7dVv9k5QzBf8khTTs-HWd7U_1UXE8uz84A.7lpthWSiaF867HegoLeoug",
-      "domain": "dev2.metawurks.com",
+      "value": "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..6dO_vVGI_Okk1MWv.05iX9nDHymvZJjdBnYXpljL-KAeenudQEJ2NLfOnBtN7LC0WrVdbAO81fRhnzUErRteLf0UfawROI-ais3EfAbPxB6TfoVRCMadO-GW-Vzgg-ycMWJYSli2KDug4o9r7xIhLDveOUIeyr-K_T5Cypkzs2yujCue4IqE1i6jSqouAM8BDwsITxxOSaV1dHYrObpyA7-ZKL0xCKyye2-jBqfqruPOf4pRLia2dTSOBV0wfAUQhycs4IK2yuWMUQCkZVbAVR3Zdvp8lZwgeu3SJtUoCCEGdzG5fwrBfbhgaW7EvgYdc8ovx9fJlh6MlivPHMAv19w.GDsKRMvNOMMRcy88eTq6rQ",
+      "domain": "stage-dev2-apps.metawurks.com",
       "path": "/",
-      "expires": 1787828824,
+      "expires": 1788080804,
       "httpOnly": true,
       "secure": true,
       "sameSite": "Lax"
@@ -43,11 +43,11 @@
   ],
   "origins": [
     {
-      "origin": "https://dev2.metawurks.com",
+      "origin": "https://stage-dev2-apps.metawurks.com",
       "localStorage": [
         {
           "name": "nextauth.message",
-          "value": "{\"event\":\"session\",\"data\":{\"trigger\":\"getSession\"},\"timestamp\":1785236817}"
+          "value": "{\"event\":\"session\",\"data\":{\"trigger\":\"getSession\"},\"timestamp\":1785488798}"
         }
       ]
     }
