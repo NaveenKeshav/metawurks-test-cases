@@ -33,7 +33,10 @@ function activeChatRow(page: Page) {
 /** Collapse Agents + Projects so the Conversations list rises to the top. */
 async function collapseSidebarSections(page: Page) {
   for (const name of ['Agents', 'Projects']) {
-    await page.getByRole('button', { name, exact: true }).first().click().catch(() => {});
+    // MUST bound the click: with no timeout, an un-actionable (covered/hidden)
+    // section button makes .click() hang until the whole test times out (the
+    // .catch only catches throws, not a hang). 5s cap → give up and move on.
+    await page.getByRole('button', { name, exact: true }).first().click({ timeout: 5_000 }).catch(() => {});
     await page.waitForTimeout(300);
   }
   await page.waitForTimeout(300);
