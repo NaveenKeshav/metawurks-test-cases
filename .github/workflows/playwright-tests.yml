@@ -45,7 +45,7 @@ jobs:
         env:
           CI: true
           BASE_URL: ${{ secrets.BASE_URL || 'https://metawurks.com/' }}
-          APP_URL: ${{ secrets.APP_URL || 'https://metawurks.com/app' }}
+          APP_URL: ${{ secrets.APP_URL || 'https://stage-dev2-apps.metawurks.com/' }}
           LOGIN_USERNAME: ${{ secrets.LOGIN_USERNAME }}
           LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
           NAVIGATION_TIMEOUT: ${{ secrets.NAVIGATION_TIMEOUT || '30000' }}

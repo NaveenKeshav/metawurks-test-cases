@@ -4,8 +4,8 @@ import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '..', '..', '.env'), quiet: true });
 
 export const config = {
-  baseUrl: process.env.BASE_URL || 'https://metawurks.com',
-  appUrl: process.env.APP_URL || 'https://apps.metawurks.com',
+  baseUrl: process.env.BASE_URL || 'https://stage-dev2-apps.metawurks.com',
+  appUrl: process.env.APP_URL || 'https://stage-dev2-apps.metawurks.com',
 
   /**
    * Backend service base URLs (Suite 36 — API-level cases the frontend cannot

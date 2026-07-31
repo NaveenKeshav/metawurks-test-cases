@@ -1,7 +1,7 @@
 # MetaWurks Frontend Web App v2 — Playwright Test Suite
 
 End-to-end Playwright tests for the MetaWurks Frontend Web App v2, targeting the
-**dev2** deployment (`https://dev2.metawurks.com`). Tests are organised to match
+**stage-dev2** deployment (`https://stage-dev2-apps.metawurks.com/`). Tests are organised to match
 the **Test Case Document** (`Frontend_WebApp_v2_TestCases_Updated.pdf`, rev.3):
 one spec file per PDF suite, with each `test()` titled by its exact TC ID.
 
@@ -21,7 +21,7 @@ Copy `.env.example` → `.env` and set the dev2 test account:
 
 | Variable | Description | Default |
 |---|---|---|
-| `BASE_URL` / `APP_URL` | App base URL | `https://dev2.metawurks.com` |
+| `BASE_URL` / `APP_URL` | App base URL | `https://stage-dev2-apps.metawurks.com` |
 | `LOGIN_USERNAME` / `LOGIN_PASSWORD` | dev2 test account (required for authenticated suites) | — |
 | `NAVIGATION_TIMEOUT` / `ELEMENT_TIMEOUT` | timeouts (ms) | 30000 / 15000 |
 
