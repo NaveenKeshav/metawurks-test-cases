@@ -5,12 +5,22 @@ import { openDataLibrary, openUploadModal, fileInput, fixture } from '../shared/
 /**
  * Suite 11 — Knowledge / Data Library  (PDF TC 11.1–11.17)
  *
- * Authenticated suite. Sources: KnowledgeSourcePage.tsx, DocumentListView.tsx,
- * FileRow.tsx. Document delete uses the NATIVE window.confirm(). Reality gaps
- * (asserted/guarded): no working column sort or sort selector (11.10), no bulk
- * select-all (11.16), "view chunks" + folder tree live on /discover not the
- * library (11.6/11.8), no status polling in the library (11.7). Cases needing
- * existing documents skip cleanly when the library is empty.
+ * Authenticated suite.
+ *
+ * IMPORTANT — verify against the DEPLOYED app, not the repo. dev2 runs a build
+ * that differs from the local KnowledgeSourcePage/DocumentListView/FileRow source:
+ * it renders a per-row `Select <filename>` CHECKBOX and deletes via
+ * checkbox → bulk "Delete" → modal confirm. There is NO native window.confirm()
+ * (the old note here claiming one is wrong), and the row kebab's Delete does not
+ * drive deletion. Assumptions taken from the local source silently do nothing.
+ *
+ * Because that checkbox exists, the "no bulk select-all" reason still carried by
+ * 11.16 / 29.5 is STALE and those cases should be re-examined.
+ *
+ * Reality gaps (asserted/guarded): no working column sort or sort selector
+ * (11.10), "view chunks" + folder tree live on /discover not the library
+ * (11.6/11.8), no status polling in the library (11.7). Cases needing existing
+ * documents skip cleanly when the library is empty.
  */
 
 /** Open Data Library and report whether any documents exist. */
@@ -75,15 +85,30 @@ test.describe('Suite 11 — Knowledge / Data Library', () => {
     const firstName = docNames(page).first();
     await expect(firstName).toBeVisible({ timeout: 10_000 });
     const name = (await firstName.innerText()).trim();
-    // Accept the native window.confirm() the app shows on delete (the "OK" popup).
-    page.on('dialog', (d) => d.accept().catch(() => {}));
-    // Open the document's 3-dots action menu (the VISIBLE desktop kebab).
-    const kebab = firstRowKebab(page);
-    await kebab.scrollIntoViewIfNeeded().catch(() => {});
-    await kebab.click({ timeout: 10_000 });
-    // Click Delete in the row menu (exact, so it is not confused with sidebar rows).
-    const del = page.getByRole('button', { name: 'Delete', exact: true }).filter({ visible: true }).first();
-    await expect(del, 'Delete action not locatable in the row menu').toBeVisible({ timeout: 10_000 });
+    // DELETE FLOW ON dev2: tick the row's checkbox → click the bulk "Delete"
+    // action → confirm "Delete" in the modal. There is NO native window.confirm(),
+    // and the row kebab's Delete does not drive it. An earlier revision used the
+    // kebab + window.confirm() path taken from the local FileRow.tsx source, which
+    // is STALE relative to the deployed build — dev2 renders a per-row
+    // `Select <filename>` checkbox the local source has no trace of. That flow
+    // silently did nothing (no dialog, no request) so the case always failed.
+    // Verify this flow against the deployed app, not the repo.
+    const checkbox = page.getByRole('checkbox', { name: `Select ${name}` }).first();
+    await checkbox.scrollIntoViewIfNeeded().catch(() => {});
+    await expect(checkbox, `row checkbox for "${name}"`).toBeVisible({ timeout: 10_000 });
+    await checkbox.check({ timeout: 15_000 });
+    // Let the selection toolbar mount before reaching for its actions; the list
+    // re-renders on selection and a click issued mid-render can hang.
+    await page.waitForTimeout(1000);
+    // Selecting a row reveals the bulk "Delete" action.
+    // `exact: true` is ESSENTIAL: getByRole name matching is substring-based, and
+    // this account has projects named "DeleteMe-<timestamp>" whose buttons match a
+    // loose 'Delete'. Without exact, .first() resolved to a project button, so the
+    // click never reached the bulk action and no request was ever issued.
+    const deleteButtons = page.getByRole('button', { name: 'Delete', exact: true }).filter({ visible: true });
+    const del = deleteButtons.first();
+    await expect(del, 'bulk Delete action not locatable after selecting a row').toBeVisible({ timeout: 25_000 });
+
     // The library holds many identically-named documents (e.g. dozens of
     // sample.pdf from prior uploads) and paginates, so a name-based "count 0"
     // check is unsound — a deleted row is backfilled by another same-named doc.
@@ -91,9 +116,18 @@ test.describe('Suite 11 — Knowledge / Data Library', () => {
     // DELETE /api/documents/<id> and must get a success response.
     const delResp = page.waitForResponse(
       (r) => r.request().method() === 'DELETE' && /\/api\/documents\//.test(r.url()),
-      { timeout: 15_000 }
+      { timeout: 20_000 }
     ).catch(() => null);
-    await del.click({ timeout: 10_000 });
+
+    await del.click({ timeout: 20_000 });
+    // Confirm in the modal — this is the "with confirmation" the PDF asks for.
+    // A second exact-"Delete" button appears once the modal opens.
+    await expect(
+      deleteButtons,
+      'a confirmation dialog with its own Delete must appear before anything is removed'
+    ).toHaveCount(2, { timeout: 10_000 });
+    await deleteButtons.nth(1).click({ timeout: 20_000 });
+
     const resp = await delResp;
     expect(resp, `deleting "${name}" should send DELETE /api/documents/<id>`).toBeTruthy();
     expect(resp!.ok(), `document delete API should succeed (got ${resp?.status()})`).toBeTruthy();
@@ -105,7 +139,7 @@ test.describe('Suite 11 — Knowledge / Data Library', () => {
     await firstRowKebab(page).click();
     const del = page.getByRole('button', { name: 'Delete' }).filter({ visible: true }).first();
     test.skip(!(await del.count()), 'Delete action not locatable');
-    await del.click();
+    await del.click({ timeout: 20_000 });
     await page.waitForTimeout(1000);
     await expect(page.getByText('Data Library').first()).toBeVisible(); // doc retained
   });
